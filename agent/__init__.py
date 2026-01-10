@@ -37,6 +37,14 @@ from agent.portfolio import (
     get_portfolio_manager,
 )
 
+from agent.prompts import (
+    QUERY_PARSER_SYSTEM_PROMPT,
+    INSIGHTS_GENERATOR_PROMPT,
+    format_portfolio_context,
+    get_query_parser_prompt,
+    get_insights_prompt,
+)
+
 __all__ = [
     # Input models
     "FetchStockDataInput",
@@ -68,4 +76,10 @@ __all__ = [
     "Portfolio",
     "PortfolioManager",
     "get_portfolio_manager",
+    # Prompts
+    "QUERY_PARSER_SYSTEM_PROMPT",
+    "INSIGHTS_GENERATOR_PROMPT",
+    "format_portfolio_context",
+    "get_query_parser_prompt",
+    "get_insights_prompt",
 ]

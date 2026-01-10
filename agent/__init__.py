@@ -5,6 +5,7 @@ from agent.models import (
     FetchStockDataInput,
     FetchBenchmarkInput,
     SimulatePortfolioInput,
+    SimulateSPYInput,
     CalculateMetricsInput,
     # Output models
     StockDataOutput,
@@ -12,6 +13,7 @@ from agent.models import (
     BenchmarkDataOutput,
     Transaction,
     SimulationOutput,
+    SPYSimulationOutput,
     PerformancePoint,
     MetricsOutput,
     Insight,
@@ -19,13 +21,28 @@ from agent.models import (
     InvestmentSummary,
 )
 
-from agent.tools import fetch_stock_data, fetch_benchmark_data, simulate_portfolio, register_tools
+from agent.tools import (
+    fetch_stock_data,
+    fetch_benchmark_data,
+    simulate_portfolio,
+    simulate_spy_investment,
+    calculate_metrics,
+    register_tools,
+)
+
+from agent.portfolio import (
+    PortfolioHolding,
+    Portfolio,
+    PortfolioManager,
+    get_portfolio_manager,
+)
 
 __all__ = [
     # Input models
     "FetchStockDataInput",
     "FetchBenchmarkInput",
     "SimulatePortfolioInput",
+    "SimulateSPYInput",
     "CalculateMetricsInput",
     # Output models
     "StockDataOutput",
@@ -33,6 +50,7 @@ __all__ = [
     "BenchmarkDataOutput",
     "Transaction",
     "SimulationOutput",
+    "SPYSimulationOutput",
     "PerformancePoint",
     "MetricsOutput",
     "Insight",
@@ -42,5 +60,12 @@ __all__ = [
     "fetch_stock_data",
     "fetch_benchmark_data",
     "simulate_portfolio",
+    "simulate_spy_investment",
+    "calculate_metrics",
     "register_tools",
+    # Portfolio management
+    "PortfolioHolding",
+    "Portfolio",
+    "PortfolioManager",
+    "get_portfolio_manager",
 ]

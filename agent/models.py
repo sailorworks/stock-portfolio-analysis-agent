@@ -159,6 +159,56 @@ class Transaction(BaseModel):
     cost: float = Field(..., description="Total cost of transaction")
 
 
+class SimulateSPYInput(BaseModel):
+    """Input model for the simulate_spy_investment tool.
+    
+    Requirements: 7.1, 7.2
+    """
+    total_amount: float = Field(
+        ...,
+        description="Total amount to invest in SPY (same as portfolio total)"
+    )
+    spy_prices: Dict[str, float] = Field(
+        ...,
+        description="SPY prices: date -> price"
+    )
+    strategy: Literal["single_shot", "dca"] = Field(
+        ...,
+        description="Investment strategy: 'single_shot' or 'dca' (same as portfolio)"
+    )
+    dca_interval: Optional[str] = Field(
+        default=None,
+        description="DCA interval: 'monthly', 'quarterly', etc. Required for DCA strategy"
+    )
+
+
+class SPYSimulationOutput(BaseModel):
+    """Output model for the simulate_spy_investment tool.
+    
+    Requirements: 7.1, 7.2
+    """
+    spy_shares: float = Field(
+        ...,
+        description="Total SPY shares purchased"
+    )
+    remaining_cash: float = Field(
+        ...,
+        description="Cash remaining after SPY purchases"
+    )
+    total_invested: float = Field(
+        ...,
+        description="Total amount invested in SPY"
+    )
+    transaction_log: List[Transaction] = Field(
+        default_factory=list,
+        description="List of all SPY buy transactions"
+    )
+    value_over_time: Dict[str, float] = Field(
+        default_factory=dict,
+        description="SPY portfolio value at each date: date -> value"
+    )
+
+
 class SimulationOutput(BaseModel):
     """Output model for the simulate_portfolio custom tool.
     

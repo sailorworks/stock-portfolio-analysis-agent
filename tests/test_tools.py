@@ -90,10 +90,14 @@ class TestFetchStockData:
             interval="1d",
         )
         
-        with pytest.raises(ValueError) as exc_info:
-            fetch_stock_data(request)
+        # With the new error handling, invalid tickers return a ToolError instead of raising
+        from agent.errors import ToolError, ErrorCode
+        result = fetch_stock_data(request)
         
-        assert "Invalid ticker" in str(exc_info.value) or "No data" in str(exc_info.value)
+        # Should return a ToolError with appropriate error code
+        assert isinstance(result, ToolError), "Expected ToolError for invalid ticker"
+        assert result.error_code in [ErrorCode.INVALID_TICKER, ErrorCode.NO_DATA_AVAILABLE]
+        assert "INVALIDTICKER123XYZ" in result.message or "No data" in result.message
 
     def test_date_range_validation(self):
         """Test that date range exceeding 4 years is truncated."""

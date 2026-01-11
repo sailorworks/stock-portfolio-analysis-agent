@@ -61,6 +61,34 @@ from agent.agent_config import (
     get_orchestrator,
 )
 
+from agent.api import (
+    app,
+    create_app,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    APIErrorResponse,
+    PortfolioHoldingRequest,
+    PortfolioRequest,
+    SSEEvent,
+    SessionAnalyzeRequest,
+    SessionInfoResponse,
+    get_session_manager_instance,
+    get_orchestrator_instance,
+)
+
+from agent.errors import (
+    ErrorCode,
+    ToolError,
+    ToolExecutionError,
+    InvalidTickerError,
+    InvalidDateError,
+    NoDataAvailableError,
+    YFinanceAPIError,
+    ValidationError,
+    log_tool_error,
+    wrap_tool_error,
+)
+
 __all__ = [
     # Input models
     "FetchStockDataInput",
@@ -110,4 +138,28 @@ __all__ = [
     "create_insights_agent",
     "AgentOrchestrator",
     "get_orchestrator",
+    # API
+    "app",
+    "create_app",
+    "AnalyzeRequest",
+    "AnalyzeResponse",
+    "APIErrorResponse",
+    "PortfolioHoldingRequest",
+    "PortfolioRequest",
+    "SSEEvent",
+    "SessionAnalyzeRequest",
+    "SessionInfoResponse",
+    "get_session_manager_instance",
+    "get_orchestrator_instance",
+    # Error handling
+    "ErrorCode",
+    "ToolError",
+    "ToolExecutionError",
+    "InvalidTickerError",
+    "InvalidDateError",
+    "NoDataAvailableError",
+    "YFinanceAPIError",
+    "ValidationError",
+    "log_tool_error",
+    "wrap_tool_error",
 ]

@@ -2,10 +2,12 @@
 
 This module defines Composio custom tools for fetching stock data,
 simulating portfolios, and calculating metrics.
+
+Requirements: 4.4 - Error handling for all tools
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import pandas as pd
 import yfinance as yf
@@ -24,6 +26,18 @@ from agent.models import (
     StockDataMetadata,
     StockDataOutput,
     Transaction,
+)
+from agent.errors import (
+    ErrorCode,
+    InvalidDateError,
+    InvalidTickerError,
+    NoDataAvailableError,
+    ToolError,
+    ToolExecutionError,
+    ValidationError,
+    YFinanceAPIError,
+    log_tool_error,
+    wrap_tool_error,
 )
 
 # Lazy initialization of Composio client
@@ -45,7 +59,7 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
     This tool downloads historical stock price data from Yahoo Finance
     for the specified tickers and date range.
     
-    Requirements: 1.1, 4.1, 4.2
+    Requirements: 1.1, 4.1, 4.2, 4.4
     
     Args:
         request: Input containing ticker_symbols, start_date, end_date, and interval
@@ -54,14 +68,31 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
         StockDataOutput with prices dict and metadata
         
     Raises:
-        ValueError: If date range exceeds 4 years or tickers are invalid
+        InvalidDateError: If date format is invalid or range exceeds limits
+        InvalidTickerError: If tickers are invalid or no data available
+        ValidationError: If input validation fails
+        YFinanceAPIError: If Yahoo Finance API fails
     """
+    # Validate tickers
+    if not request.ticker_symbols:
+        raise ValidationError(
+            field="ticker_symbols",
+            message="At least one ticker symbol is required",
+        )
+    
     # Parse dates
     try:
         start_dt = datetime.strptime(request.start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(request.end_date, "%Y-%m-%d")
     except ValueError as e:
-        raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
+        raise InvalidDateError(
+            error_type="format",
+            message=f"Invalid date format. Use YYYY-MM-DD. Error: {e}",
+            details={
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+            },
+        )
     
     # Validate date range (max 4 years per requirement 4.2)
     max_range = timedelta(days=4 * 365)
@@ -76,30 +107,49 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
     
     # Ensure start_date is before end_date
     if start_dt >= end_dt:
-        raise ValueError("start_date must be before end_date")
+        raise InvalidDateError(
+            error_type="range",
+            message="start_date must be before end_date",
+            details={
+                "start_date": start_dt.strftime("%Y-%m-%d"),
+                "end_date": end_dt.strftime("%Y-%m-%d"),
+            },
+        )
     
     # Validate interval
     valid_intervals = ["1d", "1wk", "1mo", "3mo"]
     if request.interval not in valid_intervals:
-        raise ValueError(f"Invalid interval. Must be one of: {valid_intervals}")
+        raise ValidationError(
+            field="interval",
+            message=f"Invalid interval. Must be one of: {valid_intervals}",
+            value=request.interval,
+        )
     
     # Download data from Yahoo Finance
     tickers = request.ticker_symbols
-    if not tickers:
-        raise ValueError("At least one ticker symbol is required")
     
-    # Download stock data
-    data = yf.download(
-        tickers=tickers,
-        start=start_dt.strftime("%Y-%m-%d"),
-        end=end_dt.strftime("%Y-%m-%d"),
-        interval=request.interval,
-        progress=False,
-    )
+    try:
+        # Download stock data
+        data = yf.download(
+            tickers=tickers,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_dt.strftime("%Y-%m-%d"),
+            interval=request.interval,
+            progress=False,
+        )
+    except Exception as e:
+        raise YFinanceAPIError(
+            original_error=e,
+            message=f"Failed to download stock data from Yahoo Finance: {str(e)}",
+        )
     
     # Handle empty data
     if data.empty:
-        raise ValueError(f"No data available for tickers: {tickers}")
+        raise NoDataAvailableError(
+            tickers=tickers,
+            date_range=(start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")),
+            message=f"No data available for tickers: {tickers}",
+        )
     
     # Extract closing prices
     if "Close" in data.columns:
@@ -131,10 +181,13 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
                         date_str = date_idx.strftime("%Y-%m-%d")
                         prices[ticker][date_str] = float(price)
     
-    # Check if we got data for all tickers
+    # Check if we got data for all tickers - Requirement 4.4
     missing_tickers = [t for t in tickers if t not in prices or not prices[t]]
     if missing_tickers:
-        raise ValueError(f"Invalid ticker(s) or no data available: {missing_tickers}")
+        raise InvalidTickerError(
+            tickers=missing_tickers,
+            message=f"Invalid ticker(s) or no data available: {', '.join(missing_tickers)}",
+        )
     
     # Get actual date range from data
     all_dates = []
@@ -142,7 +195,10 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
         all_dates.extend(ticker_prices.keys())
     
     if not all_dates:
-        raise ValueError(f"No price data retrieved for tickers: {tickers}")
+        raise NoDataAvailableError(
+            tickers=tickers,
+            message=f"No price data retrieved for tickers: {tickers}",
+        )
     
     sorted_dates = sorted(set(all_dates))
     actual_start = sorted_dates[0]
@@ -159,21 +215,38 @@ def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
     return StockDataOutput(prices=prices, metadata=metadata)
 
 
-def fetch_stock_data(request: FetchStockDataInput) -> StockDataOutput:
+def fetch_stock_data(request: FetchStockDataInput) -> Union[StockDataOutput, ToolError]:
     """Fetch historical closing prices for specified stock tickers.
     
     This is the main entry point for the fetch_stock_data tool.
     It can be used directly or registered with Composio.
     
-    Requirements: 1.1, 4.1, 4.2
+    Requirements: 1.1, 4.1, 4.2, 4.4
     
     Args:
         request: Input containing ticker_symbols, start_date, end_date, and interval
         
     Returns:
-        StockDataOutput with prices dict and metadata
+        StockDataOutput with prices dict and metadata, or ToolError on failure
     """
-    return _fetch_stock_data_impl(request)
+    try:
+        return _fetch_stock_data_impl(request)
+    except ToolExecutionError as e:
+        e.tool_name = "fetch_stock_data"
+        log_tool_error("fetch_stock_data", e, {
+            "tickers": request.ticker_symbols,
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+        })
+        return e.to_error_response()
+    except Exception as e:
+        wrapped = wrap_tool_error(e, "fetch_stock_data")
+        log_tool_error("fetch_stock_data", e, {
+            "tickers": request.ticker_symbols,
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+        })
+        return wrapped.to_error_response()
 
 
 def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOutput:
@@ -182,7 +255,7 @@ def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOut
     This tool downloads SPY (S&P 500 ETF) price data from Yahoo Finance
     and aligns it to the portfolio dates using forward-fill for missing dates.
     
-    Requirements: 1.2, 7.4
+    Requirements: 1.2, 7.4, 4.4
     
     Args:
         request: Input containing start_date, end_date, and portfolio_dates
@@ -191,14 +264,31 @@ def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOut
         BenchmarkDataOutput with SPY prices aligned to portfolio dates
         
     Raises:
-        ValueError: If dates are invalid or no SPY data is available
+        InvalidDateError: If dates are invalid
+        ValidationError: If portfolio_dates is empty
+        NoDataAvailableError: If no SPY data is available
+        YFinanceAPIError: If Yahoo Finance API fails
     """
+    # Validate portfolio_dates
+    if not request.portfolio_dates:
+        raise ValidationError(
+            field="portfolio_dates",
+            message="portfolio_dates cannot be empty",
+        )
+    
     # Parse dates
     try:
         start_dt = datetime.strptime(request.start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(request.end_date, "%Y-%m-%d")
     except ValueError as e:
-        raise ValueError(f"Invalid date format. Use YYYY-MM-DD. Error: {e}")
+        raise InvalidDateError(
+            error_type="format",
+            message=f"Invalid date format. Use YYYY-MM-DD. Error: {e}",
+            details={
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+            },
+        )
     
     # Ensure end_date is not in the future
     today = datetime.now()
@@ -207,33 +297,57 @@ def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOut
     
     # Ensure start_date is before end_date
     if start_dt >= end_dt:
-        raise ValueError("start_date must be before end_date")
-    
-    # Validate portfolio_dates
-    if not request.portfolio_dates:
-        raise ValueError("portfolio_dates cannot be empty")
+        raise InvalidDateError(
+            error_type="range",
+            message="start_date must be before end_date",
+            details={
+                "start_date": start_dt.strftime("%Y-%m-%d"),
+                "end_date": end_dt.strftime("%Y-%m-%d"),
+            },
+        )
     
     # Download SPY data at daily interval for accurate alignment
-    spy_data = yf.download(
-        tickers="SPY",
-        start=start_dt.strftime("%Y-%m-%d"),
-        end=(end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),  # Include end_date
-        interval="1d",
-        progress=False,
-    )
+    try:
+        spy_data = yf.download(
+            tickers="SPY",
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=(end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),  # Include end_date
+            interval="1d",
+            progress=False,
+        )
+    except Exception as e:
+        raise YFinanceAPIError(
+            original_error=e,
+            message=f"Failed to download SPY data from Yahoo Finance: {str(e)}",
+        )
     
     # Handle empty data
     if spy_data.empty:
-        raise ValueError("No SPY data available for the specified date range")
+        raise NoDataAvailableError(
+            tickers=["SPY"],
+            date_range=(start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")),
+            message="No SPY data available for the specified date range",
+        )
     
     # Extract closing prices - handle both single and multi-column formats
-    if isinstance(spy_data.columns, pd.MultiIndex):
-        # Multi-level columns (e.g., ('Close', 'SPY'))
-        spy_close = spy_data["Close"]["SPY"] if "SPY" in spy_data["Close"].columns else spy_data["Close"].iloc[:, 0]
-    elif "Close" in spy_data.columns:
-        spy_close = spy_data["Close"]
-    else:
-        raise ValueError("Unable to extract SPY closing prices")
+    try:
+        if isinstance(spy_data.columns, pd.MultiIndex):
+            # Multi-level columns (e.g., ('Close', 'SPY'))
+            spy_close = spy_data["Close"]["SPY"] if "SPY" in spy_data["Close"].columns else spy_data["Close"].iloc[:, 0]
+        elif "Close" in spy_data.columns:
+            spy_close = spy_data["Close"]
+        else:
+            raise NoDataAvailableError(
+                tickers=["SPY"],
+                message="Unable to extract SPY closing prices from data",
+            )
+    except Exception as e:
+        if isinstance(e, ToolExecutionError):
+            raise
+        raise NoDataAvailableError(
+            tickers=["SPY"],
+            message=f"Unable to extract SPY closing prices: {str(e)}",
+        )
     
     # Ensure spy_close is a Series with a simple index
     if isinstance(spy_close, pd.DataFrame):
@@ -245,7 +359,11 @@ def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOut
         try:
             portfolio_dates_dt.append(datetime.strptime(date_str, "%Y-%m-%d"))
         except ValueError:
-            raise ValueError(f"Invalid portfolio date format: {date_str}. Use YYYY-MM-DD.")
+            raise InvalidDateError(
+                error_type="format",
+                message=f"Invalid portfolio date format: {date_str}. Use YYYY-MM-DD.",
+                details={"invalid_date": date_str},
+            )
     
     # Create a pandas DatetimeIndex from portfolio dates
     portfolio_index = pd.DatetimeIndex(portfolio_dates_dt)
@@ -275,26 +393,45 @@ def _fetch_benchmark_data_impl(request: FetchBenchmarkInput) -> BenchmarkDataOut
     # Verify we have prices for all portfolio dates
     missing_dates = [d for d in request.portfolio_dates if d not in spy_prices]
     if missing_dates:
-        raise ValueError(f"Unable to align SPY prices for dates: {missing_dates}")
+        raise NoDataAvailableError(
+            tickers=["SPY"],
+            message=f"Unable to align SPY prices for dates: {', '.join(missing_dates[:5])}{'...' if len(missing_dates) > 5 else ''}",
+        )
     
     return BenchmarkDataOutput(spy_prices=spy_prices)
 
 
-def fetch_benchmark_data(request: FetchBenchmarkInput) -> BenchmarkDataOutput:
+def fetch_benchmark_data(request: FetchBenchmarkInput) -> Union[BenchmarkDataOutput, ToolError]:
     """Fetch SPY benchmark prices aligned to portfolio dates.
     
     This is the main entry point for the fetch_benchmark_data tool.
     It can be used directly or registered with Composio.
     
-    Requirements: 1.2, 7.4
+    Requirements: 1.2, 7.4, 4.4
     
     Args:
         request: Input containing start_date, end_date, and portfolio_dates
         
     Returns:
-        BenchmarkDataOutput with SPY prices aligned to portfolio dates
+        BenchmarkDataOutput with SPY prices aligned to portfolio dates, or ToolError on failure
     """
-    return _fetch_benchmark_data_impl(request)
+    try:
+        return _fetch_benchmark_data_impl(request)
+    except ToolExecutionError as e:
+        e.tool_name = "fetch_benchmark_data"
+        log_tool_error("fetch_benchmark_data", e, {
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+            "portfolio_dates_count": len(request.portfolio_dates) if request.portfolio_dates else 0,
+        })
+        return e.to_error_response()
+    except Exception as e:
+        wrapped = wrap_tool_error(e, "fetch_benchmark_data")
+        log_tool_error("fetch_benchmark_data", e, {
+            "start_date": request.start_date,
+            "end_date": request.end_date,
+        })
+        return wrapped.to_error_response()
 
 
 def _simulate_single_shot(
@@ -479,7 +616,7 @@ def _simulate_portfolio_impl(request: SimulatePortfolioInput) -> SimulationOutpu
     This tool simulates portfolio investment using either single-shot
     or DCA (Dollar-Cost Averaging) strategy.
     
-    Requirements: 5.1, 5.2, 5.3, 5.4
+    Requirements: 5.1, 5.2, 5.3, 5.4, 4.4
     
     Args:
         request: Input containing stock_prices, ticker_amounts, strategy,
@@ -488,7 +625,27 @@ def _simulate_portfolio_impl(request: SimulatePortfolioInput) -> SimulationOutpu
     Returns:
         SimulationOutput with holdings, remaining_cash, transaction_log,
         and insufficient_funds list
+        
+    Raises:
+        ValidationError: If strategy is invalid or inputs are missing
     """
+    # Validate strategy
+    valid_strategies = ["single_shot", "dca"]
+    if request.strategy not in valid_strategies:
+        raise ValidationError(
+            field="strategy",
+            message=f"Invalid strategy: {request.strategy}. Must be 'single_shot' or 'dca'",
+            value=request.strategy,
+        )
+    
+    # Validate available_cash
+    if request.available_cash < 0:
+        raise ValidationError(
+            field="available_cash",
+            message="available_cash cannot be negative",
+            value=request.available_cash,
+        )
+    
     holdings: Dict[str, float] = {}
     transaction_log: list[Transaction] = []
     insufficient_funds: list[str] = []
@@ -546,8 +703,6 @@ def _simulate_portfolio_impl(request: SimulatePortfolioInput) -> SimulationOutpu
             
             if had_insufficient or (shares == 0 and amount > 0):
                 insufficient_funds.append(ticker)
-        else:
-            raise ValueError(f"Invalid strategy: {request.strategy}. Must be 'single_shot' or 'dca'")
     
     return SimulationOutput(
         holdings=holdings,
@@ -558,13 +713,13 @@ def _simulate_portfolio_impl(request: SimulatePortfolioInput) -> SimulationOutpu
     )
 
 
-def simulate_portfolio(request: SimulatePortfolioInput) -> SimulationOutput:
+def simulate_portfolio(request: SimulatePortfolioInput) -> Union[SimulationOutput, ToolError]:
     """Simulate buying stocks based on investment strategy.
     
     This is the main entry point for the simulate_portfolio tool.
     It can be used directly or registered with Composio.
     
-    Requirements: 5.1, 5.2, 5.3, 5.4
+    Requirements: 5.1, 5.2, 5.3, 5.4, 4.4
     
     Args:
         request: Input containing stock_prices, ticker_amounts, strategy,
@@ -572,9 +727,25 @@ def simulate_portfolio(request: SimulatePortfolioInput) -> SimulationOutput:
         
     Returns:
         SimulationOutput with holdings, remaining_cash, transaction_log,
-        and insufficient_funds list
+        and insufficient_funds list, or ToolError on failure
     """
-    return _simulate_portfolio_impl(request)
+    try:
+        return _simulate_portfolio_impl(request)
+    except ToolExecutionError as e:
+        e.tool_name = "simulate_portfolio"
+        log_tool_error("simulate_portfolio", e, {
+            "strategy": request.strategy,
+            "tickers": list(request.ticker_amounts.keys()),
+            "available_cash": request.available_cash,
+        })
+        return e.to_error_response()
+    except Exception as e:
+        wrapped = wrap_tool_error(e, "simulate_portfolio")
+        log_tool_error("simulate_portfolio", e, {
+            "strategy": request.strategy,
+            "tickers": list(request.ticker_amounts.keys()),
+        })
+        return wrapped.to_error_response()
 
 
 def _simulate_spy_single_shot(
@@ -767,7 +938,7 @@ def _simulate_spy_investment_impl(request: SimulateSPYInput) -> SPYSimulationOut
     This tool simulates SPY investment using either single-shot
     or DCA (Dollar-Cost Averaging) strategy, matching the portfolio strategy.
     
-    Requirements: 7.1, 7.2
+    Requirements: 7.1, 7.2, 4.4
     
     Args:
         request: Input containing total_amount, spy_prices, strategy,
@@ -776,7 +947,34 @@ def _simulate_spy_investment_impl(request: SimulateSPYInput) -> SPYSimulationOut
     Returns:
         SPYSimulationOutput with spy_shares, remaining_cash, total_invested,
         transaction_log, and value_over_time
+        
+    Raises:
+        ValidationError: If strategy is invalid or inputs are missing
     """
+    # Validate strategy
+    valid_strategies = ["single_shot", "dca"]
+    if request.strategy not in valid_strategies:
+        raise ValidationError(
+            field="strategy",
+            message=f"Invalid strategy: {request.strategy}. Must be 'single_shot' or 'dca'",
+            value=request.strategy,
+        )
+    
+    # Validate total_amount
+    if request.total_amount < 0:
+        raise ValidationError(
+            field="total_amount",
+            message="total_amount cannot be negative",
+            value=request.total_amount,
+        )
+    
+    # Validate spy_prices
+    if not request.spy_prices:
+        raise ValidationError(
+            field="spy_prices",
+            message="spy_prices cannot be empty",
+        )
+    
     # Validate DCA interval if using DCA strategy
     if request.strategy == "dca" and not request.dca_interval:
         dca_interval = "monthly"
@@ -794,8 +992,6 @@ def _simulate_spy_investment_impl(request: SimulateSPYInput) -> SPYSimulationOut
             spy_prices=request.spy_prices,
             dca_interval=dca_interval,
         )
-    else:
-        raise ValueError(f"Invalid strategy: {request.strategy}. Must be 'single_shot' or 'dca'")
     
     return SPYSimulationOutput(
         spy_shares=shares,
@@ -806,13 +1002,13 @@ def _simulate_spy_investment_impl(request: SimulateSPYInput) -> SPYSimulationOut
     )
 
 
-def simulate_spy_investment(request: SimulateSPYInput) -> SPYSimulationOutput:
+def simulate_spy_investment(request: SimulateSPYInput) -> Union[SPYSimulationOutput, ToolError]:
     """Simulate investing in SPY using the same strategy as the portfolio.
     
     This is the main entry point for the simulate_spy_investment tool.
     It can be used directly or registered with Composio.
     
-    Requirements: 7.1, 7.2
+    Requirements: 7.1, 7.2, 4.4
     
     Args:
         request: Input containing total_amount, spy_prices, strategy,
@@ -820,9 +1016,24 @@ def simulate_spy_investment(request: SimulateSPYInput) -> SPYSimulationOutput:
         
     Returns:
         SPYSimulationOutput with spy_shares, remaining_cash, total_invested,
-        transaction_log, and value_over_time
+        transaction_log, and value_over_time, or ToolError on failure
     """
-    return _simulate_spy_investment_impl(request)
+    try:
+        return _simulate_spy_investment_impl(request)
+    except ToolExecutionError as e:
+        e.tool_name = "simulate_spy_investment"
+        log_tool_error("simulate_spy_investment", e, {
+            "strategy": request.strategy,
+            "total_amount": request.total_amount,
+        })
+        return e.to_error_response()
+    except Exception as e:
+        wrapped = wrap_tool_error(e, "simulate_spy_investment")
+        log_tool_error("simulate_spy_investment", e, {
+            "strategy": request.strategy,
+            "total_amount": request.total_amount,
+        })
+        return wrapped.to_error_response()
 
 
 def _calculate_portfolio_value(
@@ -1080,13 +1291,13 @@ def _calculate_metrics_impl(request: CalculateMetricsInput) -> MetricsOutput:
     )
 
 
-def calculate_metrics(request: CalculateMetricsInput) -> MetricsOutput:
+def calculate_metrics(request: CalculateMetricsInput) -> Union[MetricsOutput, ToolError]:
     """Calculate portfolio performance metrics.
     
     This is the main entry point for the calculate_metrics tool.
     It can be used directly or registered with Composio.
     
-    Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.3
+    Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 7.3, 4.4
     
     Args:
         request: Input containing holdings, current_prices, invested_amounts,
@@ -1094,9 +1305,22 @@ def calculate_metrics(request: CalculateMetricsInput) -> MetricsOutput:
         
     Returns:
         MetricsOutput with total_value, returns, percent_returns,
-        allocations, and performance_data
+        allocations, and performance_data, or ToolError on failure
     """
-    return _calculate_metrics_impl(request)
+    try:
+        return _calculate_metrics_impl(request)
+    except ToolExecutionError as e:
+        e.tool_name = "calculate_metrics"
+        log_tool_error("calculate_metrics", e, {
+            "tickers": list(request.holdings.keys()),
+        })
+        return e.to_error_response()
+    except Exception as e:
+        wrapped = wrap_tool_error(e, "calculate_metrics")
+        log_tool_error("calculate_metrics", e, {
+            "tickers": list(request.holdings.keys()),
+        })
+        return wrapped.to_error_response()
 
 
 def register_tools():

@@ -250,6 +250,98 @@ Generate 2-4 bullish insights and 2-4 bearish insights based on the portfolio da
 
 
 # =============================================================================
+# Insights Generator with Portfolio Context
+# =============================================================================
+
+INSIGHTS_GENERATOR_WITH_CONTEXT_PROMPT = """
+You are a financial analysis assistant specialized in generating investment insights for stock portfolios. Your role is to analyze the provided portfolio performance data and generate both bullish (positive) and bearish (risk) insights specific to the holdings.
+
+## PORTFOLIO DATA
+
+{PORTFOLIO_DATA}
+
+## INSIGHT GENERATION RULES (Requirements 8.1, 8.2, 8.3)
+
+### Bullish Insights (Requirement 8.1)
+Generate positive insights about the portfolio based on the actual data:
+- Compare portfolio returns vs SPY benchmark returns
+- Highlight tickers with strong positive returns
+- Note diversification benefits if multiple sectors represented
+- Identify growth trends in the performance data
+- Recognize outperformance relative to market
+
+### Bearish Insights (Requirement 8.2)
+Generate risk-related insights about the portfolio based on the actual data:
+- Identify underperformance vs SPY benchmark
+- Flag concentration risk if one ticker dominates allocation
+- Note negative returns on specific holdings
+- Highlight volatility concerns based on price movements
+- Warn about sector concentration risks
+
+### Insight Structure (Requirement 8.3)
+Each insight MUST include ALL THREE fields:
+1. **title**: A short, descriptive title (max 50 characters) - REQUIRED
+2. **description**: A detailed explanation (1-2 sentences) - REQUIRED
+3. **emoji**: A single relevant emoji representing the insight - REQUIRED
+
+## OUTPUT FORMAT
+
+You MUST return insights in this exact JSON structure:
+
+```json
+{
+    "bull_insights": [
+        {
+            "title": "Example Title",
+            "description": "Example description explaining the insight.",
+            "emoji": "📈"
+        }
+    ],
+    "bear_insights": [
+        {
+            "title": "Example Title",
+            "description": "Example description explaining the risk.",
+            "emoji": "⚠️"
+        }
+    ]
+}
+```
+
+## EMOJI REFERENCE
+
+### Bullish Emojis
+- 📈 Upward trend / Performance
+- 🚀 Strong growth / Momentum
+- 💪 Strength / Resilience
+- 🌟 Excellence / Standout
+- 💰 Profits / Returns
+- ✅ Positive / Success
+- 🎯 On target / Achievement
+- 💎 Value / Quality
+
+### Bearish Emojis
+- 📉 Downward trend / Decline
+- ⚠️ Warning / Caution
+- 🔻 Drop / Decrease
+- ⏰ Timing risk / Patience needed
+- 💸 Loss / Money at risk
+- ❌ Negative / Concern
+- 🎲 Risk / Uncertainty
+- 🔥 Volatility / Danger
+
+## ANALYSIS REQUIREMENTS
+
+1. **Use the actual data provided** - reference specific tickers, returns, and allocations
+2. **Be specific** - mention actual percentages and ticker symbols
+3. **Balance insights** - provide 2-4 bullish AND 2-4 bearish insights
+4. **Be actionable** - insights should help inform investment decisions
+5. **Stay objective** - present facts from the data, not predictions
+
+Generate insights NOW based on the portfolio data above.
+"""
+
+
+# =============================================================================
 # Helper Functions for Prompt Generation
 # =============================================================================
 
@@ -346,6 +438,134 @@ def get_insights_prompt() -> str:
     return INSIGHTS_GENERATOR_PROMPT
 
 
+def format_portfolio_data_for_insights(
+    tickers: List[str],
+    holdings: Dict[str, float],
+    current_prices: Dict[str, float],
+    invested_amounts: Dict[str, float],
+    returns: Dict[str, float],
+    percent_returns: Dict[str, float],
+    allocations: Dict[str, float],
+    total_value: float,
+    spy_return: Optional[float] = None,
+) -> str:
+    """Format portfolio data into a context string for insights generation.
+    
+    Requirements: 8.1, 8.2, 8.3
+    
+    Args:
+        tickers: List of ticker symbols in the portfolio
+        holdings: Shares held per ticker
+        current_prices: Current price per ticker
+        invested_amounts: Amount invested per ticker
+        returns: Absolute returns per ticker
+        percent_returns: Percentage returns per ticker
+        allocations: Allocation percentage per ticker
+        total_value: Total portfolio value
+        spy_return: SPY benchmark return percentage (optional)
+        
+    Returns:
+        Formatted portfolio data string for the insights prompt
+    """
+    lines = [
+        "### Portfolio Holdings",
+        "",
+        "| Ticker | Shares | Current Price | Invested | Current Value | Return | Return % | Allocation % |",
+        "|--------|--------|---------------|----------|---------------|--------|----------|--------------|",
+    ]
+    
+    total_invested = sum(invested_amounts.values())
+    
+    for ticker in tickers:
+        shares = holdings.get(ticker, 0)
+        price = current_prices.get(ticker, 0)
+        invested = invested_amounts.get(ticker, 0)
+        current_value = shares * price
+        ret = returns.get(ticker, 0)
+        pct_ret = percent_returns.get(ticker, 0)
+        alloc = allocations.get(ticker, 0)
+        
+        lines.append(
+            f"| {ticker} | {shares:.2f} | ${price:.2f} | ${invested:,.2f} | "
+            f"${current_value:,.2f} | ${ret:,.2f} | {pct_ret:.2f}% | {alloc:.2f}% |"
+        )
+    
+    lines.extend([
+        "",
+        "### Portfolio Summary",
+        "",
+        f"- **Total Invested**: ${total_invested:,.2f}",
+        f"- **Total Current Value**: ${total_value:,.2f}",
+        f"- **Total Return**: ${total_value - total_invested:,.2f}",
+        f"- **Total Return %**: {((total_value - total_invested) / total_invested * 100) if total_invested > 0 else 0:.2f}%",
+    ])
+    
+    if spy_return is not None:
+        lines.extend([
+            "",
+            "### Benchmark Comparison",
+            "",
+            f"- **SPY Return %**: {spy_return:.2f}%",
+            f"- **Portfolio vs SPY**: {((total_value - total_invested) / total_invested * 100) - spy_return if total_invested > 0 else 0:.2f}% difference",
+        ])
+    
+    lines.extend([
+        "",
+        "### Tickers in Portfolio",
+        "",
+        f"**{', '.join(tickers)}**",
+    ])
+    
+    return "\n".join(lines)
+
+
+def get_insights_prompt_with_context(
+    tickers: List[str],
+    holdings: Dict[str, float],
+    current_prices: Dict[str, float],
+    invested_amounts: Dict[str, float],
+    returns: Dict[str, float],
+    percent_returns: Dict[str, float],
+    allocations: Dict[str, float],
+    total_value: float,
+    spy_return: Optional[float] = None,
+) -> str:
+    """Get the insights generator prompt with portfolio data injected.
+    
+    Requirements: 8.1, 8.2, 8.3
+    
+    Args:
+        tickers: List of ticker symbols in the portfolio
+        holdings: Shares held per ticker
+        current_prices: Current price per ticker
+        invested_amounts: Amount invested per ticker
+        returns: Absolute returns per ticker
+        percent_returns: Percentage returns per ticker
+        allocations: Allocation percentage per ticker
+        total_value: Total portfolio value
+        spy_return: SPY benchmark return percentage (optional)
+        
+    Returns:
+        Complete insights prompt with portfolio data context
+    """
+    portfolio_data = format_portfolio_data_for_insights(
+        tickers=tickers,
+        holdings=holdings,
+        current_prices=current_prices,
+        invested_amounts=invested_amounts,
+        returns=returns,
+        percent_returns=percent_returns,
+        allocations=allocations,
+        total_value=total_value,
+        spy_return=spy_return,
+    )
+    
+    return INSIGHTS_GENERATOR_WITH_CONTEXT_PROMPT.replace(
+        "{PORTFOLIO_DATA}",
+        portfolio_data
+    )
+
+
 # =============================================================================
 # Exported Constants and Functions
 # =============================================================================
@@ -353,7 +573,10 @@ def get_insights_prompt() -> str:
 __all__ = [
     "QUERY_PARSER_SYSTEM_PROMPT",
     "INSIGHTS_GENERATOR_PROMPT",
+    "INSIGHTS_GENERATOR_WITH_CONTEXT_PROMPT",
     "format_portfolio_context",
     "get_query_parser_prompt",
     "get_insights_prompt",
+    "format_portfolio_data_for_insights",
+    "get_insights_prompt_with_context",
 ]

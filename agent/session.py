@@ -127,7 +127,7 @@ class SessionManager:
         
         # Register fetch_stock_data as a Composio custom tool
         @composio.tools.custom_tool
-        def fetch_stock_data(request: FetchStockDataInput) -> StockDataOutput:
+        def fetch_stock_data(request: FetchStockDataInput) -> dict:
             """Fetch historical closing prices for specified stock tickers.
             
             Downloads historical stock price data from Yahoo Finance
@@ -137,13 +137,14 @@ class SessionManager:
                 request: Input containing ticker_symbols, start_date, end_date, and interval
                 
             Returns:
-                StockDataOutput with prices dict and metadata
+                Dict with prices and metadata
             """
-            return _fetch_stock_data_impl(request)
+            result = _fetch_stock_data_impl(request)
+            return result.model_dump()
         
         # Register fetch_benchmark_data as a Composio custom tool
         @composio.tools.custom_tool
-        def fetch_benchmark_data(request: FetchBenchmarkInput) -> BenchmarkDataOutput:
+        def fetch_benchmark_data(request: FetchBenchmarkInput) -> dict:
             """Fetch SPY benchmark prices aligned to portfolio dates.
             
             Downloads SPY (S&P 500 ETF) price data from Yahoo Finance
@@ -153,13 +154,14 @@ class SessionManager:
                 request: Input containing start_date, end_date, and portfolio_dates
                 
             Returns:
-                BenchmarkDataOutput with SPY prices aligned to portfolio dates
+                Dict with SPY prices aligned to portfolio dates
             """
-            return _fetch_benchmark_data_impl(request)
+            result = _fetch_benchmark_data_impl(request)
+            return result.model_dump()
         
         # Register simulate_portfolio as a Composio custom tool
         @composio.tools.custom_tool
-        def simulate_portfolio(request: SimulatePortfolioInput) -> SimulationOutput:
+        def simulate_portfolio(request: SimulatePortfolioInput) -> dict:
             """Simulate buying stocks based on investment strategy.
             
             Simulates portfolio investment using either single-shot
@@ -170,14 +172,15 @@ class SessionManager:
                          available_cash, and optional dca_interval
                 
             Returns:
-                SimulationOutput with holdings, remaining_cash, transaction_log,
+                Dict with holdings, remaining_cash, transaction_log,
                 and insufficient_funds list
             """
-            return _simulate_portfolio_impl(request)
+            result = _simulate_portfolio_impl(request)
+            return result.model_dump()
         
         # Register simulate_spy_investment as a Composio custom tool
         @composio.tools.custom_tool
-        def simulate_spy_investment(request: SimulateSPYInput) -> SPYSimulationOutput:
+        def simulate_spy_investment(request: SimulateSPYInput) -> dict:
             """Simulate investing in SPY using the same strategy as the portfolio.
             
             Simulates SPY investment using either single-shot
@@ -188,14 +191,15 @@ class SessionManager:
                          and optional dca_interval
                 
             Returns:
-                SPYSimulationOutput with spy_shares, remaining_cash, total_invested,
+                Dict with spy_shares, remaining_cash, total_invested,
                 transaction_log, and value_over_time
             """
-            return _simulate_spy_investment_impl(request)
+            result = _simulate_spy_investment_impl(request)
+            return result.model_dump()
         
         # Register calculate_metrics as a Composio custom tool
         @composio.tools.custom_tool
-        def calculate_metrics(request: CalculateMetricsInput) -> MetricsOutput:
+        def calculate_metrics(request: CalculateMetricsInput) -> dict:
             """Calculate portfolio performance metrics.
             
             Calculates comprehensive portfolio metrics including total value,
@@ -206,10 +210,11 @@ class SessionManager:
                          historical_prices, spy_prices, and remaining_cash
                 
             Returns:
-                MetricsOutput with total_value, returns, percent_returns,
+                Dict with total_value, returns, percent_returns,
                 allocations, and performance_data
             """
-            return _calculate_metrics_impl(request)
+            result = _calculate_metrics_impl(request)
+            return result.model_dump()
         
         self._tools_registered = True
     

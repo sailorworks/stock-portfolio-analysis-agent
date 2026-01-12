@@ -6,12 +6,13 @@ This module provides the REST API endpoint for portfolio analysis including:
 - SSE streaming endpoint for real-time progress updates
 - Exception handlers for proper error responses
 
-Requirements: 10.1, 10.2, 10.3, 10.4
+Requirements: 3.1, 3.2, 3.3, 3.4, 10.1, 10.2, 10.3, 10.4
 """
 
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -20,13 +21,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
+from agents import Runner
+
 from agent.models import (
     InvestmentSummary,
     Insights,
     PerformancePoint,
 )
 from agent.portfolio import Portfolio, PortfolioHolding, get_portfolio_manager
-from agent.agent_config import get_orchestrator
+from agent.agent_config import get_orchestrator, create_portfolio_agent
+from agent.session import get_session_manager
 from agent.tools import (
     fetch_stock_data,
     fetch_benchmark_data,
@@ -526,6 +530,450 @@ def parse_query_simple(query: str) -> Dict[str, Any]:
     return params
 
 
+async def run_agent_analysis(
+    query: str,
+    user_id: str,
+    portfolio_holdings: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Run the portfolio analysis agent with the given query.
+    
+    Requirements: 3.1, 3.2 - Use Runner.run(agent, query) for analysis
+    
+    This function:
+    1. Gets or creates a portfolio agent for the user
+    2. Runs the agent with the user's query using Runner.run
+    3. Extracts tool call results from result.new_items
+    
+    Args:
+        query: Natural language investment query
+        user_id: User ID for session management
+        portfolio_holdings: Optional list of existing portfolio holdings
+        
+    Returns:
+        Dict containing the analysis results or error information
+    """
+    try:
+        # Get the orchestrator and create an agent
+        orchestrator = get_orchestrator()
+        
+        # Create portfolio context if holdings provided
+        portfolio = None
+        if portfolio_holdings:
+            from agent.portfolio import Portfolio, PortfolioHolding
+            holdings = [
+                PortfolioHolding(
+                    ticker_symbol=h.get("ticker_symbol", ""),
+                    investment_amount=h.get("investment_amount", 0),
+                    purchase_date=h.get("purchase_date", ""),
+                )
+                for h in portfolio_holdings
+            ]
+            portfolio = Portfolio(user_id=user_id, holdings=holdings)
+        
+        # Get the portfolio agent with tools from Composio session
+        agent = orchestrator.get_portfolio_agent(user_id=user_id, portfolio=portfolio)
+        
+        # Run the agent with the user's query
+        # Requirements: 3.1, 3.2 - Use Runner.run instead of direct tool calls
+        result = await Runner.run(agent, query)
+        
+        # Parse the agent's final output
+        final_output = result.final_output if hasattr(result, 'final_output') else str(result)
+        
+        # Extract tool call results from result.new_items
+        tool_results = {}
+        tool_calls_made = []
+        
+        # Track tool calls and their outputs
+        pending_tool_calls = {}  # call_id -> tool_name
+        
+        if hasattr(result, 'new_items'):
+            for item in result.new_items:
+                item_type = type(item).__name__
+                
+                if item_type == 'ToolCallItem':
+                    # Extract tool name from raw_item
+                    raw_item = getattr(item, 'raw_item', None)
+                    if raw_item:
+                        # raw_item is typically a ResponseFunctionToolCall
+                        tool_name = getattr(raw_item, 'name', None)
+                        call_id = getattr(raw_item, 'call_id', None)
+                        if tool_name:
+                            tool_calls_made.append(tool_name)
+                            if call_id:
+                                pending_tool_calls[call_id] = tool_name
+                                logger.debug(f"Registered tool call: {tool_name} with call_id: {call_id}")
+                            logger.info(f"Tool called via Composio: {tool_name}")
+                
+                elif item_type == 'ToolCallOutputItem':
+                    # Extract output and match to tool call
+                    output = getattr(item, 'output', None)
+                    raw_item = getattr(item, 'raw_item', None)
+                    
+                    if output:
+                        # Try to get call_id from raw_item
+                        call_id = None
+                        if raw_item:
+                            if isinstance(raw_item, dict):
+                                # raw_item is a dict
+                                call_id = raw_item.get('call_id') or raw_item.get('tool_call_id') or raw_item.get('id')
+                            else:
+                                # raw_item is an object
+                                for attr in ['call_id', 'tool_call_id', 'id']:
+                                    if hasattr(raw_item, attr):
+                                        call_id = getattr(raw_item, attr)
+                                        if call_id:
+                                            break
+                        
+                        tool_name = pending_tool_calls.get(call_id) if call_id else None
+                        
+                        if tool_name:
+                            # Store the latest output for each tool
+                            tool_results[tool_name] = output
+                            logger.info(f"Got output for tool: {tool_name}, output type: {type(output)}")
+                        else:
+                            # If we can't match by call_id, try to infer from output structure
+                            # This is a fallback - try to identify the tool from the output
+                            if isinstance(output, str):
+                                try:
+                                    output_data = json.loads(output)
+                                except:
+                                    output_data = {}
+                            else:
+                                output_data = output if isinstance(output, dict) else {}
+                            
+                            # Infer tool name from output structure
+                            inferred_tool = None
+                            if 'prices' in output_data and 'metadata' in output_data:
+                                inferred_tool = 'FETCH_STOCK_DATA'
+                            elif 'spy_prices' in output_data:
+                                inferred_tool = 'FETCH_BENCHMARK_DATA'
+                            elif 'holdings' in output_data and 'transaction_log' in output_data:
+                                inferred_tool = 'SIMULATE_PORTFOLIO'
+                            elif 'spy_shares' in output_data:
+                                inferred_tool = 'SIMULATE_SPY_INVESTMENT'
+                            elif 'total_value' in output_data and 'performance_data' in output_data:
+                                inferred_tool = 'CALCULATE_METRICS'
+                            
+                            if inferred_tool:
+                                tool_results[inferred_tool] = output
+                                logger.info(f"Inferred tool from output structure: {inferred_tool}")
+        
+        # Log what tools were called
+        if tool_calls_made:
+            logger.info(f"Agent called {len(tool_calls_made)} tools via Composio: {list(set(tool_calls_made))}")
+        else:
+            logger.warning("Agent did not call any tools - will need fallback")
+        
+        return {
+            "success": True,
+            "output": final_output,
+            "result": result,
+            "tool_results": tool_results,
+            "tool_calls_made": tool_calls_made,
+        }
+        
+    except Exception as e:
+        logger.exception(f"Error running agent analysis: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+def build_summary_from_tool_results(
+    tool_results: Dict[str, Any],
+) -> Optional[InvestmentSummary]:
+    """Build an InvestmentSummary from Composio tool call results.
+    
+    This function extracts data from the tool results returned by the agent
+    when it successfully calls tools via Composio.
+    
+    Args:
+        tool_results: Dict mapping tool names to their outputs
+        
+    Returns:
+        InvestmentSummary if we have enough data, None otherwise
+    """
+    try:
+        # Normalize tool names to uppercase for matching
+        normalized_results = {}
+        for k, v in tool_results.items():
+            logger.info(f"Processing tool result for {k}: type={type(v)}")
+            
+            # Parse the result - it might be a string (JSON) or already a dict
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                    logger.info(f"Parsed JSON for {k}: keys={list(v.keys()) if isinstance(v, dict) else 'not a dict'}")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON for {k}: {e}")
+                    continue
+            
+            # Handle wrapped output format: {'successful': True, 'error': None, 'data': {...}}
+            if isinstance(v, dict) and 'data' in v and 'successful' in v:
+                logger.info(f"Unwrapping data for {k}: successful={v.get('successful')}, error={v.get('error')}, data_type={type(v.get('data'))}")
+                if v.get('successful') and v.get('data'):
+                    v = v.get('data', {})
+                    if v:
+                        logger.info(f"Unwrapped data for {k}: keys={list(v.keys()) if isinstance(v, dict) else 'not a dict'}")
+                else:
+                    # Tool execution failed - log the error and skip
+                    logger.warning(f"Tool {k} failed: error={v.get('error')}")
+                    continue
+            
+            normalized_results[k.upper()] = v
+        
+        # We need at least simulate_portfolio and calculate_metrics results
+        simulation_result = normalized_results.get('SIMULATE_PORTFOLIO')
+        metrics_result = normalized_results.get('CALCULATE_METRICS')
+        stock_data_result = normalized_results.get('FETCH_STOCK_DATA')
+        benchmark_result = normalized_results.get('FETCH_BENCHMARK_DATA')
+        spy_simulation_result = normalized_results.get('SIMULATE_SPY_INVESTMENT')
+        
+        if simulation_result:
+            logger.info(f"Found simulation result: {list(simulation_result.keys()) if isinstance(simulation_result, dict) else type(simulation_result)}")
+        if metrics_result:
+            logger.info(f"Found metrics result: {list(metrics_result.keys()) if isinstance(metrics_result, dict) else type(metrics_result)}")
+        if stock_data_result:
+            logger.info(f"Found stock data result: {list(stock_data_result.keys()) if isinstance(stock_data_result, dict) else type(stock_data_result)}")
+        
+        # If we don't have metrics, try to build from simulation + stock data
+        if not metrics_result and simulation_result and stock_data_result:
+            logger.info("No CALCULATE_METRICS result, building summary from simulation and stock data")
+            
+            holdings = simulation_result.get('holdings', {})
+            remaining_cash = simulation_result.get('remaining_cash', 0.0)
+            
+            # Get current prices from stock data
+            current_prices = {}
+            prices_data = stock_data_result.get('prices', {})
+            for ticker, prices in prices_data.items():
+                if prices:
+                    latest_date = max(prices.keys())
+                    current_prices[ticker] = prices[latest_date]
+            
+            # Calculate total value
+            total_value = remaining_cash
+            for ticker, shares in holdings.items():
+                if ticker in current_prices:
+                    total_value += shares * current_prices[ticker]
+            
+            # Calculate returns
+            returns = {}
+            invested_amounts = {}
+            for txn in simulation_result.get('transaction_log', []):
+                if isinstance(txn, dict):
+                    ticker = txn.get('ticker')
+                    cost = txn.get('cost', 0)
+                    invested_amounts[ticker] = invested_amounts.get(ticker, 0) + cost
+            
+            for ticker, shares in holdings.items():
+                invested = invested_amounts.get(ticker, 0)
+                current_val = shares * current_prices.get(ticker, 0)
+                returns[ticker] = current_val - invested
+            
+            # Calculate percent returns
+            percent_returns = {}
+            for ticker, ret in returns.items():
+                invested = invested_amounts.get(ticker, 0)
+                if invested > 0:
+                    percent_returns[ticker] = (ret / invested) * 100
+            
+            # Calculate allocations
+            allocations = {}
+            stock_value = total_value - remaining_cash
+            for ticker, shares in holdings.items():
+                ticker_value = shares * current_prices.get(ticker, 0)
+                if stock_value > 0:
+                    allocations[ticker] = (ticker_value / stock_value) * 100
+            
+            # Build investment log
+            investment_log = []
+            for txn in simulation_result.get('transaction_log', []):
+                if isinstance(txn, dict):
+                    investment_log.append(
+                        f"Bought {txn.get('shares', 0):.2f} shares of {txn.get('ticker', 'N/A')} "
+                        f"at ${txn.get('price', 0):.2f} on {txn.get('date', 'N/A')} "
+                        f"(${txn.get('cost', 0):,.2f})"
+                    )
+            
+            # Build performance data from historical prices
+            performance_data = []
+            if prices_data and benchmark_result:
+                spy_prices = benchmark_result.get('spy_prices', {})
+                # Get all dates
+                all_dates = set()
+                for ticker_prices in prices_data.values():
+                    all_dates.update(ticker_prices.keys())
+                
+                sorted_dates = sorted(all_dates)
+                initial_investment = sum(invested_amounts.values()) + remaining_cash
+                
+                for date in sorted_dates:
+                    # Calculate portfolio value at this date
+                    portfolio_value = remaining_cash
+                    for ticker, shares in holdings.items():
+                        ticker_prices = prices_data.get(ticker, {})
+                        # Find the price at or before this date
+                        price = None
+                        for d in sorted(ticker_prices.keys()):
+                            if d <= date:
+                                price = ticker_prices[d]
+                        if price:
+                            portfolio_value += shares * price
+                    
+                    # Get SPY value at this date
+                    spy_price = spy_prices.get(date)
+                    spy_value = initial_investment  # Default
+                    if spy_price and spy_simulation_result:
+                        spy_shares = spy_simulation_result.get('spy_shares', 0)
+                        spy_cash = spy_simulation_result.get('remaining_cash', 0)
+                        spy_value = spy_shares * spy_price + spy_cash
+                    
+                    performance_data.append(PerformancePoint(
+                        date=date,
+                        portfolio=portfolio_value,
+                        spy=spy_value,
+                    ))
+            
+            summary = InvestmentSummary(
+                holdings=holdings,
+                final_prices=current_prices,
+                cash=remaining_cash,
+                returns=returns,
+                total_value=total_value,
+                investment_log=investment_log,
+                percent_allocation=allocations,
+                percent_return=percent_returns,
+                performance_data=performance_data,
+                insights=None,
+            )
+            
+            logger.info(f"Successfully built summary from Composio tool results (without metrics)! Total value: {summary.total_value}")
+            return summary
+        
+        # We need at least metrics to build a summary the standard way
+        if not metrics_result:
+            logger.warning(f"No CALCULATE_METRICS result found. Available tools: {list(normalized_results.keys())}")
+            return None
+        
+        # Extract data from metrics result
+        holdings = metrics_result.get('holdings', {})
+        if not holdings and simulation_result:
+            holdings = simulation_result.get('holdings', {})
+        
+        current_prices = {}
+        if stock_data_result and 'prices' in stock_data_result:
+            # Get latest price for each ticker
+            for ticker, prices in stock_data_result['prices'].items():
+                if prices:
+                    latest_date = max(prices.keys())
+                    current_prices[ticker] = prices[latest_date]
+        
+        # Get remaining cash
+        remaining_cash = 0.0
+        if simulation_result:
+            remaining_cash = simulation_result.get('remaining_cash', 0.0)
+        
+        # Build investment log from simulation transactions
+        investment_log = []
+        if simulation_result and 'transaction_log' in simulation_result:
+            for txn in simulation_result['transaction_log']:
+                if isinstance(txn, dict):
+                    investment_log.append(
+                        f"Bought {txn.get('shares', 0):.2f} shares of {txn.get('ticker', 'N/A')} "
+                        f"at ${txn.get('price', 0):.2f} on {txn.get('date', 'N/A')} "
+                        f"(${txn.get('cost', 0):,.2f})"
+                    )
+        
+        # Build performance data
+        performance_data = []
+        if 'performance_data' in metrics_result:
+            for point in metrics_result['performance_data']:
+                if isinstance(point, dict):
+                    performance_data.append(PerformancePoint(
+                        date=point.get('date', ''),
+                        portfolio=point.get('portfolio', 0.0),
+                        spy=point.get('spy', 0.0),
+                    ))
+        
+        summary = InvestmentSummary(
+            holdings=holdings,
+            final_prices=current_prices or metrics_result.get('current_prices', {}),
+            cash=remaining_cash,
+            returns=metrics_result.get('returns', {}),
+            total_value=metrics_result.get('total_value', 0.0),
+            investment_log=investment_log,
+            percent_allocation=metrics_result.get('allocations', {}),
+            percent_return=metrics_result.get('percent_returns', {}),
+            performance_data=performance_data,
+            insights=None,
+        )
+        
+        logger.info(f"Successfully built summary from Composio tool results! Total value: {summary.total_value}")
+        return summary
+        
+    except Exception as e:
+        logger.warning(f"Failed to build summary from tool results: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+        return None
+
+
+def parse_agent_output_to_summary(
+    agent_output: str,
+    fallback_params: Optional[Dict[str, Any]] = None,
+) -> Optional[InvestmentSummary]:
+    """Parse the agent's output to extract investment summary data.
+    
+    The agent may return structured data or natural language. This function
+    attempts to extract the relevant information and construct an InvestmentSummary.
+    
+    Args:
+        agent_output: The raw output from the agent
+        fallback_params: Optional fallback parameters if parsing fails
+        
+    Returns:
+        InvestmentSummary if parsing succeeds, None otherwise
+    """
+    try:
+        # Try to parse as JSON first
+        if isinstance(agent_output, str):
+            # Look for JSON in the output
+            json_match = re.search(r'\{[\s\S]*\}', agent_output)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                    # Check if it looks like an investment summary
+                    if "holdings" in data or "total_value" in data:
+                        return InvestmentSummary(
+                            holdings=data.get("holdings", {}),
+                            final_prices=data.get("final_prices", {}),
+                            cash=data.get("cash", 0.0),
+                            returns=data.get("returns", {}),
+                            total_value=data.get("total_value", 0.0),
+                            investment_log=data.get("investment_log", []),
+                            percent_allocation=data.get("percent_allocation", {}),
+                            percent_return=data.get("percent_return", {}),
+                            performance_data=[
+                                PerformancePoint(**p) if isinstance(p, dict) else p
+                                for p in data.get("performance_data", [])
+                            ],
+                            insights=data.get("insights"),
+                        )
+                except json.JSONDecodeError:
+                    pass
+        
+        # If we can't parse the output, return None
+        # The caller should fall back to direct tool execution
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Failed to parse agent output: {e}")
+        return None
+
+
 # =============================================================================
 # API Endpoints
 # =============================================================================
@@ -551,13 +999,18 @@ async def health_check():
 async def analyze_portfolio(request: AnalyzeRequest):
     """Analyze a portfolio based on a natural language query.
     
-    Requirements: 10.1, 10.2, 10.3, 10.4
+    This endpoint uses Runner.run(agent, query) to process the user's
+    natural language query through the AI agent, which orchestrates
+    tool execution via Composio Tool Router.
+    
+    Requirements: 3.1, 3.2, 10.1, 10.2, 10.3, 10.4
     
     This endpoint:
     - Accepts user queries and portfolio state (10.1)
     - Streams progress events using SSE (10.2)
     - Emits state delta events for UI updates (10.3)
     - Returns investment summary with all calculated metrics (10.4)
+    - Uses Runner.run(agent, query) for tool orchestration (3.1, 3.2)
     
     Args:
         request: AnalyzeRequest with query, user_id, and portfolio
@@ -574,6 +1027,60 @@ async def analyze_portfolio(request: AnalyzeRequest):
             # Emit status: Starting analysis
             yield format_sse_event("status", {"message": "Starting portfolio analysis..."})
             await asyncio.sleep(0.1)  # Small delay for UI responsiveness
+            
+            # Prepare portfolio holdings for the agent context
+            portfolio_holdings = None
+            if request.portfolio and request.portfolio.holdings:
+                portfolio_holdings = [
+                    {
+                        "ticker_symbol": h.ticker_symbol,
+                        "investment_amount": h.investment_amount,
+                        "purchase_date": h.purchase_date,
+                    }
+                    for h in request.portfolio.holdings
+                ]
+            
+            # Run the agent with the user's query
+            # Requirements: 3.1, 3.2 - Use Runner.run(agent, query) instead of direct tool calls
+            yield format_sse_event("status", {"message": "Running AI agent for portfolio analysis..."})
+            
+            agent_result = await run_agent_analysis(
+                query=request.query,
+                user_id=user_id,
+                portfolio_holdings=portfolio_holdings,
+            )
+            
+            if not agent_result.get("success"):
+                yield format_sse_event("error", {
+                    "message": agent_result.get("error", "Agent execution failed")
+                })
+                return
+            
+            yield format_sse_event("tool_log", {
+                "tool": "agent",
+                "message": "Agent completed analysis"
+            })
+            
+            # Try to parse the agent output into an InvestmentSummary
+            agent_output = agent_result.get("output", "")
+            summary = parse_agent_output_to_summary(agent_output)
+            
+            if summary:
+                # Emit portfolio update
+                yield format_sse_event("portfolio_update", {
+                    "holdings": summary.holdings,
+                    "remaining_cash": summary.cash,
+                    "total_invested": summary.total_value - summary.cash,
+                })
+                
+                # Emit the final result
+                yield format_sse_event("result", summary.model_dump())
+                yield format_sse_event("status", {"message": "Analysis complete!"})
+                return
+            
+            # If we couldn't parse the agent output, fall back to direct tool execution
+            # This ensures backward compatibility while the agent learns to return structured data
+            logger.info("Agent output could not be parsed, falling back to direct tool execution")
             
             # Parse the query to extract parameters
             yield format_sse_event("status", {"message": "Parsing investment query..."})
@@ -806,10 +1313,11 @@ async def analyze_portfolio(request: AnalyzeRequest):
 async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
     """Synchronous version of portfolio analysis (non-streaming).
     
-    This endpoint provides a simpler interface for clients that don't
-    support SSE streaming.
+    This endpoint uses Runner.run(agent, query) to process the user's
+    natural language query through the AI agent, which orchestrates
+    tool execution via Composio Tool Router.
     
-    Requirements: 10.1, 10.4
+    Requirements: 3.1, 3.2, 10.1, 10.4
     
     Args:
         request: AnalyzeRequest with query, user_id, and portfolio
@@ -821,7 +1329,59 @@ async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
         # Generate user_id if not provided
         user_id = request.user_id or str(uuid.uuid4())
         
-        # Parse the query
+        # Prepare portfolio holdings for the agent context
+        portfolio_holdings = None
+        if request.portfolio and request.portfolio.holdings:
+            portfolio_holdings = [
+                {
+                    "ticker_symbol": h.ticker_symbol,
+                    "investment_amount": h.investment_amount,
+                    "purchase_date": h.purchase_date,
+                }
+                for h in request.portfolio.holdings
+            ]
+        
+        # Run the agent with the user's query
+        # Requirements: 3.1, 3.2 - Use Runner.run(agent, query) instead of direct tool calls
+        agent_result = await run_agent_analysis(
+            query=request.query,
+            user_id=user_id,
+            portfolio_holdings=portfolio_holdings,
+        )
+        
+        if not agent_result.get("success"):
+            return AnalyzeResponse(
+                success=False,
+                error=agent_result.get("error", "Agent execution failed")
+            )
+        
+        # Check if agent called tools via Composio
+        tool_calls_made = agent_result.get("tool_calls_made", [])
+        tool_results = agent_result.get("tool_results", {})
+        
+        if tool_calls_made:
+            logger.info(f"Agent successfully called tools via Composio: {tool_calls_made}")
+            
+            # Try to build summary from tool results
+            summary = build_summary_from_tool_results(tool_results)
+            if summary:
+                logger.info("Successfully built summary from Composio tool results")
+                return AnalyzeResponse(success=True, summary=summary)
+            else:
+                logger.warning("Could not build summary from tool results, trying text parsing")
+        
+        # Try to parse the agent output into an InvestmentSummary
+        agent_output = agent_result.get("output", "")
+        summary = parse_agent_output_to_summary(agent_output)
+        
+        if summary:
+            return AnalyzeResponse(success=True, summary=summary)
+        
+        # If we couldn't parse the agent output, fall back to direct tool execution
+        # This ensures backward compatibility while the agent learns to return structured data
+        logger.info("Agent output could not be parsed, falling back to direct tool execution")
+        
+        # Parse the query to extract parameters
         params = parse_query_simple(request.query)
         
         # Validate we have tickers

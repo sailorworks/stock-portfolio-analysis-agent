@@ -27,7 +27,7 @@ from agent.tools import (
     simulate_portfolio,
     simulate_spy_investment,
     calculate_metrics,
-    register_tools,
+    get_composio,
 )
 
 from agent.portfolio import (
@@ -51,6 +51,9 @@ from agent.prompts import (
 from agent.session import (
     SessionManager,
     get_session_manager,
+    get_default_tools,
+    DEFAULT_USER_ID,
+    CUSTOM_TOOL_SLUGS,
 )
 
 from agent.agent_config import (
@@ -114,7 +117,7 @@ __all__ = [
     "simulate_portfolio",
     "simulate_spy_investment",
     "calculate_metrics",
-    "register_tools",
+    "get_composio",
     # Portfolio management
     "PortfolioHolding",
     "Portfolio",
@@ -132,6 +135,9 @@ __all__ = [
     # Session management
     "SessionManager",
     "get_session_manager",
+    "get_default_tools",
+    "DEFAULT_USER_ID",
+    "CUSTOM_TOOL_SLUGS",
     # Agent configuration
     "DEFAULT_MODEL",
     "create_portfolio_agent",

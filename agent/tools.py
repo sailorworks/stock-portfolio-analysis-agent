@@ -3,7 +3,7 @@
 This module defines Composio custom tools for fetching stock data,
 simulating portfolios, and calculating metrics.
 
-Requirements: 4.4 - Error handling for all tools
+Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 4.4 - Custom tool registration and error handling
 """
 
 from datetime import datetime, timedelta
@@ -11,6 +11,8 @@ from typing import Dict, Optional, Union
 
 import pandas as pd
 import yfinance as yf
+
+from composio import Composio
 
 from agent.models import (
     BenchmarkDataOutput,
@@ -41,16 +43,129 @@ from agent.errors import (
 )
 
 # Lazy initialization of Composio client
-_composio: Optional["Composio"] = None
+_composio: Optional[Composio] = None
+_tools_registered: bool = False
 
 
-def get_composio():
-    """Get or create the Composio client instance."""
-    global _composio
+def get_composio() -> Composio:
+    """Get or create the Composio client instance.
+    
+    This function lazily initializes the Composio client and registers
+    all custom tools with the Tool Router.
+    
+    Returns:
+        Composio client instance with registered tools
+    """
+    global _composio, _tools_registered
     if _composio is None:
-        from composio import Composio
         _composio = Composio()
+    
+    # Register tools if not already registered
+    if not _tools_registered:
+        _register_all_tools(_composio)
+        _tools_registered = True
+    
     return _composio
+
+
+def _register_all_tools(composio: Composio) -> None:
+    """Register all custom tools with Composio.
+    
+    This function registers the following tools with the Composio Tool Router:
+    - fetch_stock_data: Fetch historical stock prices (Requirement 1.1)
+    - fetch_benchmark_data: Fetch SPY benchmark data (Requirement 1.2)
+    - simulate_portfolio: Simulate portfolio investment (Requirement 1.3)
+    - simulate_spy_investment: Simulate SPY investment (Requirement 1.4)
+    - calculate_metrics: Calculate portfolio metrics (Requirement 1.5)
+    
+    Args:
+        composio: The Composio client instance to register tools with
+    """
+    # Register fetch_stock_data - Requirement 1.1
+    @composio.tools.custom_tool
+    def fetch_stock_data(request: FetchStockDataInput) -> StockDataOutput:
+        """Fetch historical closing prices for specified stock tickers.
+        
+        Downloads historical stock price data from Yahoo Finance
+        for the specified tickers and date range.
+        
+        Args:
+            request: Input containing ticker_symbols, start_date, end_date, and interval
+            
+        Returns:
+            StockDataOutput with prices dict and metadata
+        """
+        return _fetch_stock_data_impl(request)
+    
+    # Register fetch_benchmark_data - Requirement 1.2
+    @composio.tools.custom_tool
+    def fetch_benchmark_data(request: FetchBenchmarkInput) -> BenchmarkDataOutput:
+        """Fetch SPY benchmark prices aligned to portfolio dates.
+        
+        Downloads SPY (S&P 500 ETF) price data from Yahoo Finance
+        and aligns it to the portfolio dates using forward-fill.
+        
+        Args:
+            request: Input containing start_date, end_date, and portfolio_dates
+            
+        Returns:
+            BenchmarkDataOutput with SPY prices aligned to portfolio dates
+        """
+        return _fetch_benchmark_data_impl(request)
+    
+    # Register simulate_portfolio - Requirement 1.3
+    @composio.tools.custom_tool
+    def simulate_portfolio(request: SimulatePortfolioInput) -> SimulationOutput:
+        """Simulate buying stocks based on investment strategy.
+        
+        Simulates portfolio investment using either single-shot
+        or DCA (Dollar-Cost Averaging) strategy.
+        
+        Args:
+            request: Input containing stock_prices, ticker_amounts, strategy,
+                     available_cash, and optional dca_interval
+            
+        Returns:
+            SimulationOutput with holdings, remaining_cash, transaction_log,
+            and insufficient_funds list
+        """
+        return _simulate_portfolio_impl(request)
+    
+    # Register simulate_spy_investment - Requirement 1.4
+    @composio.tools.custom_tool
+    def simulate_spy_investment(request: SimulateSPYInput) -> SPYSimulationOutput:
+        """Simulate investing in SPY using the same strategy as the portfolio.
+        
+        Simulates SPY investment using either single-shot
+        or DCA (Dollar-Cost Averaging) strategy, matching the portfolio strategy.
+        
+        Args:
+            request: Input containing total_amount, spy_prices, strategy,
+                     and optional dca_interval
+            
+        Returns:
+            SPYSimulationOutput with spy_shares, remaining_cash, total_invested,
+            transaction_log, and value_over_time
+        """
+        return _simulate_spy_investment_impl(request)
+    
+    # Register calculate_metrics - Requirement 1.5
+    @composio.tools.custom_tool
+    def calculate_metrics(request: CalculateMetricsInput) -> MetricsOutput:
+        """Calculate portfolio performance metrics.
+        
+        Calculates comprehensive portfolio metrics including total value,
+        returns, allocations, and time-series performance data.
+        
+        Args:
+            request: Input containing holdings, current_prices, invested_amounts,
+                     historical_prices, spy_prices, and remaining_cash
+            
+        Returns:
+            MetricsOutput with total_value, returns, percent_returns,
+            allocations, and performance_data
+        """
+        return _calculate_metrics_impl(request)
 
 
 def _fetch_stock_data_impl(request: FetchStockDataInput) -> StockDataOutput:
@@ -1321,87 +1436,3 @@ def calculate_metrics(request: CalculateMetricsInput) -> Union[MetricsOutput, To
             "tickers": list(request.holdings.keys()),
         })
         return wrapped.to_error_response()
-
-
-def register_tools():
-    """Register all custom tools with Composio.
-    
-    Call this function after setting up the Composio API key
-    to register the custom tools with the Tool Router.
-    """
-    composio = get_composio()
-    
-    # Register fetch_stock_data as a Composio custom tool
-    @composio.tools.custom_tool
-    def fetch_stock_data_tool(request: FetchStockDataInput) -> StockDataOutput:
-        """Fetch historical closing prices for specified stock tickers.
-        
-        Downloads historical stock price data from Yahoo Finance
-        for the specified tickers and date range.
-        
-        Args:
-            request: Input containing ticker_symbols, start_date, end_date, and interval
-            
-        Returns:
-            StockDataOutput with prices dict and metadata
-        """
-        return _fetch_stock_data_impl(request)
-    
-    # Register fetch_benchmark_data as a Composio custom tool
-    @composio.tools.custom_tool
-    def fetch_benchmark_data_tool(request: FetchBenchmarkInput) -> BenchmarkDataOutput:
-        """Fetch SPY benchmark prices aligned to portfolio dates.
-        
-        Downloads SPY (S&P 500 ETF) price data from Yahoo Finance
-        and aligns it to the portfolio dates using forward-fill.
-        
-        Args:
-            request: Input containing start_date, end_date, and portfolio_dates
-            
-        Returns:
-            BenchmarkDataOutput with SPY prices aligned to portfolio dates
-        """
-        return _fetch_benchmark_data_impl(request)
-    
-    # Register simulate_portfolio as a Composio custom tool
-    @composio.tools.custom_tool
-    def simulate_portfolio_tool(request: SimulatePortfolioInput) -> SimulationOutput:
-        """Simulate buying stocks based on investment strategy.
-        
-        Simulates portfolio investment using either single-shot
-        or DCA (Dollar-Cost Averaging) strategy.
-        
-        Args:
-            request: Input containing stock_prices, ticker_amounts, strategy,
-                     available_cash, and optional dca_interval
-            
-        Returns:
-            SimulationOutput with holdings, remaining_cash, transaction_log,
-            and insufficient_funds list
-        """
-        return _simulate_portfolio_impl(request)
-    
-    # Register calculate_metrics as a Composio custom tool
-    @composio.tools.custom_tool
-    def calculate_metrics_tool(request: CalculateMetricsInput) -> MetricsOutput:
-        """Calculate portfolio performance metrics.
-        
-        Calculates comprehensive portfolio metrics including total value,
-        returns, allocations, and time-series performance data.
-        
-        Args:
-            request: Input containing holdings, current_prices, invested_amounts,
-                     historical_prices, spy_prices, and remaining_cash
-            
-        Returns:
-            MetricsOutput with total_value, returns, percent_returns,
-            allocations, and performance_data
-        """
-        return _calculate_metrics_impl(request)
-    
-    return {
-        "fetch_stock_data": fetch_stock_data_tool,
-        "fetch_benchmark_data": fetch_benchmark_data_tool,
-        "simulate_portfolio": simulate_portfolio_tool,
-        "calculate_metrics": calculate_metrics_tool,
-    }

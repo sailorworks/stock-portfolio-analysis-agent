@@ -5,7 +5,7 @@ This module provides Composio session management functionality including:
 - Creating user sessions
 - Registering all custom tools
 
-Requirements: 9.1, 9.2, 9.3
+Requirements: 2.1, 2.2, 2.3
 """
 
 import os
@@ -34,6 +34,18 @@ from agent.tools import (
     _calculate_metrics_impl,
 )
 
+# Default user ID for session creation
+DEFAULT_USER_ID = "default"
+
+# Custom tool slugs - these are the tools registered with @composio.tools.custom_tool
+CUSTOM_TOOL_SLUGS = [
+    "FETCH_STOCK_DATA",
+    "FETCH_BENCHMARK_DATA",
+    "SIMULATE_PORTFOLIO",
+    "SIMULATE_SPY_INVESTMENT",
+    "CALCULATE_METRICS",
+]
+
 
 class SessionManager:
     """Manages Composio sessions and tool registration for users.
@@ -42,27 +54,46 @@ class SessionManager:
     initializing the Composio client with OpenAI Agents provider and
     registering all custom tools.
     
-    Requirements: 9.1, 9.2, 9.3
+    Requirements: 2.1, 2.2, 2.3
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, auto_create_default: bool = True):
         """Initialize the session manager with Composio.
         
-        Requirements: 9.1 - Use Tool Router to orchestrate the workflow
+        Creates a Composio client with OpenAI Agents provider and optionally
+        creates a default session on initialization.
+        
+        Requirements: 2.1, 2.3 - Create session on application startup
         
         Args:
             api_key: Optional Composio API key. If not provided, will use
                      COMPOSIO_API_KEY environment variable.
+            auto_create_default: If True, creates a default session on initialization.
         """
         self._api_key = api_key or os.environ.get("COMPOSIO_API_KEY")
         self._composio: Optional[Composio] = None
         self._sessions: Dict[str, Any] = {}
         self._tools_registered = False
+        self._default_session: Optional[Any] = None
+        
+        # Initialize Composio and create default session on startup (Requirement 2.3)
+        if auto_create_default:
+            self._initialize()
+    
+    def _initialize(self) -> None:
+        """Initialize Composio and create the default session.
+        
+        Requirements: 2.1, 2.3 - Create session using composio.create(user_id="default")
+        """
+        # Initialize Composio client
+        self._get_composio()
+        # Create default session on startup
+        self._default_session = self.create_session(DEFAULT_USER_ID)
     
     def _get_composio(self) -> Composio:
         """Get or create the Composio client instance.
         
-        Requirements: 9.1 - Initialize Composio with OpenAI provider
+        Requirements: 2.1 - Initialize Composio with OpenAI provider
         
         Returns:
             Composio client instance configured with OpenAI Agents provider
@@ -78,7 +109,7 @@ class SessionManager:
     def _register_custom_tools(self) -> None:
         """Register all custom tools with Composio.
         
-        Requirements: 9.3 - Register all custom tools with Composio
+        Requirements: 2.2 - Session provides access to all registered custom tools
         
         This method registers the following custom tools:
         - fetch_stock_data: Fetch historical stock prices
@@ -185,7 +216,7 @@ class SessionManager:
     def create_session(self, user_id: str) -> Any:
         """Create a Composio session for a user.
         
-        Requirements: 9.2 - Use Composio sessions for user-scoped state management
+        Requirements: 2.1 - Create session using composio.create(user_id="default")
         
         Args:
             user_id: Unique identifier for the user
@@ -195,8 +226,7 @@ class SessionManager:
         """
         composio = self._get_composio()
         
-        # Create a session for the user
-        # The session provides user-scoped tool access
+        # Create a session for the user using composio.create(user_id=...)
         session = composio.create(user_id=user_id)
         
         # Store the session for later retrieval
@@ -215,10 +245,22 @@ class SessionManager:
         """
         return self._sessions.get(user_id)
     
+    def get_default_session(self) -> Any:
+        """Get the default session created on initialization.
+        
+        Requirements: 2.3 - Session created on application startup
+        
+        Returns:
+            The default Composio session
+        """
+        if self._default_session is None:
+            self._default_session = self.create_session(DEFAULT_USER_ID)
+        return self._default_session
+    
     def get_or_create_session(self, user_id: str) -> Any:
         """Get an existing session or create a new one for a user.
         
-        Requirements: 9.2 - Use Composio sessions for user-scoped state management
+        Requirements: 2.1 - Create session using composio.create(user_id=...)
         
         Args:
             user_id: Unique identifier for the user
@@ -231,19 +273,42 @@ class SessionManager:
             session = self.create_session(user_id)
         return session
     
-    def get_tools(self, user_id: str) -> List[Any]:
-        """Get all registered tools for a user session.
+    def get_tools(self, user_id: Optional[str] = None) -> List[Any]:
+        """Get all registered custom tools as FunctionTool objects.
         
-        Requirements: 9.3 - Register all custom tools with Composio
+        Requirements: 2.2 - Session provides access to tools via session.tools()
+        
+        This method retrieves the custom tools registered with Composio and
+        returns them as OpenAI Agents SDK FunctionTool objects.
         
         Args:
-            user_id: Unique identifier for the user
+            user_id: Unique identifier for the user. If None, uses default user.
             
         Returns:
-            List of tools available for the user session
+            List of FunctionTool objects for all 5 custom tools
         """
-        session = self.get_or_create_session(user_id)
-        return session.tools()
+        composio = self._get_composio()
+        effective_user_id = user_id or DEFAULT_USER_ID
+        
+        # Get custom tools as FunctionTool objects using composio.tools.get()
+        # This wraps the custom tools for use with OpenAI Agents SDK
+        tools = composio.tools.get(
+            user_id=effective_user_id,
+            tools=CUSTOM_TOOL_SLUGS,
+        )
+        return tools
+    
+    def tools(self) -> List[Any]:
+        """Get all registered custom tools from the default session.
+        
+        Requirements: 2.2 - Session provides access to tools via session.tools()
+        
+        This is a convenience method that returns custom tools for the default user.
+        
+        Returns:
+            List of FunctionTool objects for all 5 custom tools
+        """
+        return self.get_tools()
     
     def close_session(self, user_id: str) -> None:
         """Close and remove a user session.
@@ -253,22 +318,47 @@ class SessionManager:
         """
         if user_id in self._sessions:
             del self._sessions[user_id]
+        # Reset default session if closing the default user
+        if user_id == DEFAULT_USER_ID:
+            self._default_session = None
 
 
-# Global session manager instance
+# Global session manager instance - created lazily
 _session_manager: Optional[SessionManager] = None
 
 
 def get_session_manager(api_key: Optional[str] = None) -> SessionManager:
     """Get or create the global session manager instance.
     
+    This function returns the global SessionManager, creating it if necessary.
+    The SessionManager automatically creates a default session on initialization.
+    
+    Requirements: 2.3 - Session created on application startup
+    
     Args:
         api_key: Optional Composio API key
         
     Returns:
-        The global SessionManager instance
+        The global SessionManager instance with default session ready
     """
     global _session_manager
     if _session_manager is None:
-        _session_manager = SessionManager(api_key=api_key)
+        _session_manager = SessionManager(api_key=api_key, auto_create_default=True)
     return _session_manager
+
+
+def get_default_tools(api_key: Optional[str] = None) -> List[Any]:
+    """Get tools from the default session.
+    
+    Convenience function to get tools from the default session.
+    
+    Requirements: 2.2 - Session provides access to tools via session.tools()
+    
+    Args:
+        api_key: Optional Composio API key
+        
+    Returns:
+        List of tools available in the default session
+    """
+    manager = get_session_manager(api_key)
+    return manager.tools()

@@ -51,6 +51,7 @@ from agent.errors import (
     ToolExecutionError,
     log_tool_error,
 )
+from agent.insights import generate_insights_from_summary
 
 
 # Configure logging
@@ -1274,7 +1275,7 @@ async def analyze_portfolio(request: AnalyzeRequest):
                     f"Bought {txn.shares:.2f} shares of {txn.ticker} at ${txn.price:.2f} on {txn.date} (${txn.cost:,.2f})"
                 )
             
-            # Build the final investment summary
+            # Build the initial investment summary (without insights)
             yield format_sse_event("status", {"message": "Generating investment summary..."})
             
             summary = InvestmentSummary(
@@ -1287,8 +1288,31 @@ async def analyze_portfolio(request: AnalyzeRequest):
                 percent_allocation=metrics.allocations,
                 percent_return=metrics.percent_returns,
                 performance_data=metrics.performance_data,
-                insights=None,  # Insights generation would require LLM call
+                insights=None,
             )
+            
+            # Step 7: Generate insights via LLM (Requirements 4.1, 4.2, 4.3, 4.4)
+            yield format_sse_event("status", {"message": "Generating AI insights..."})
+            
+            try:
+                insights = await generate_insights_from_summary(summary)
+                if insights:
+                    summary.insights = insights
+                    yield format_sse_event("tool_log", {
+                        "tool": "insights_generator",
+                        "message": f"Generated {len(insights.bull_insights)} bull and {len(insights.bear_insights)} bear insights"
+                    })
+                else:
+                    yield format_sse_event("tool_log", {
+                        "tool": "insights_generator",
+                        "message": "Could not generate insights"
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to generate insights: {e}")
+                yield format_sse_event("tool_log", {
+                    "tool": "insights_generator",
+                    "message": f"Insights generation failed: {str(e)}"
+                })
             
             # Emit the final result
             yield format_sse_event("result", summary.model_dump())
@@ -1366,6 +1390,15 @@ async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
             summary = build_summary_from_tool_results(tool_results)
             if summary:
                 logger.info("Successfully built summary from Composio tool results")
+                # Generate insights via LLM (Requirements 4.1, 4.2, 4.3, 4.4)
+                try:
+                    insights = await generate_insights_from_summary(summary)
+                    if insights:
+                        summary.insights = insights
+                        logger.info(f"Generated {len(insights.bull_insights)} bull and {len(insights.bear_insights)} bear insights")
+                except Exception as e:
+                    logger.warning(f"Failed to generate insights: {e}")
+                    # Continue without insights - they are optional
                 return AnalyzeResponse(success=True, summary=summary)
             else:
                 logger.warning("Could not build summary from tool results, trying text parsing")
@@ -1375,6 +1408,15 @@ async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
         summary = parse_agent_output_to_summary(agent_output)
         
         if summary:
+            # Generate insights via LLM (Requirements 4.1, 4.2, 4.3, 4.4)
+            try:
+                insights = await generate_insights_from_summary(summary)
+                if insights:
+                    summary.insights = insights
+                    logger.info(f"Generated {len(insights.bull_insights)} bull and {len(insights.bear_insights)} bear insights")
+            except Exception as e:
+                logger.warning(f"Failed to generate insights: {e}")
+                # Continue without insights - they are optional
             return AnalyzeResponse(success=True, summary=summary)
         
         # If we couldn't parse the agent output, fall back to direct tool execution
@@ -1490,7 +1532,7 @@ async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
             for txn in simulation.transaction_log
         ]
         
-        # Build summary
+        # Build summary (without insights initially)
         summary = InvestmentSummary(
             holdings=simulation.holdings,
             final_prices=current_prices,
@@ -1503,6 +1545,16 @@ async def analyze_portfolio_sync(request: AnalyzeRequest) -> AnalyzeResponse:
             performance_data=metrics.performance_data,
             insights=None,
         )
+        
+        # Generate insights via LLM (Requirements 4.1, 4.2, 4.3, 4.4)
+        try:
+            insights = await generate_insights_from_summary(summary)
+            if insights:
+                summary.insights = insights
+                logger.info(f"Generated {len(insights.bull_insights)} bull and {len(insights.bear_insights)} bear insights")
+        except Exception as e:
+            logger.warning(f"Failed to generate insights: {e}")
+            # Continue without insights - they are optional
         
         return AnalyzeResponse(success=True, summary=summary)
         

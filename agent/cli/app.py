@@ -208,15 +208,20 @@ class PortfolioApp(App):
         margin-bottom: 1;
     }
     
+    #input-label {
+        color: #58A6FF;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    
     #query-input {
         border: solid #58A6FF;
-        background: #0f0f23;
-        color: #e0e0e0;
-        padding: 1;
+        background: #0a0a1a;
+        width: 100%;
     }
     
     #query-input:focus {
-        border: solid #7ec8ff;
+        border: double #7ec8ff;
     }
     
     #query-input.-disabled {
@@ -227,6 +232,11 @@ class PortfolioApp(App):
     #results-container {
         height: 1fr;
         overflow-y: auto;
+        display: none;
+    }
+    
+    #results-container.visible {
+        display: block;
     }
     
     #left-panel {
@@ -267,23 +277,23 @@ class PortfolioApp(App):
         yield Header()
         
         with Container(id="main-container"):
-            # Input area
-            with Container(id="input-container"):
-                yield Input(
-                    placeholder="Ask anything... (e.g., 'What if I invested $10k in AAPL since 2020?')",
-                    id="query-input",
-                )
-            
             # Welcome message - Requirements 1.3
             yield WelcomeMessage(id="welcome-message")
+            
+            # Input area - simple and clean
+            yield Label("💬 Enter your investment query:", id="input-label")
+            yield Input(
+                placeholder="e.g., What if I invested $10k in AAPL since 2020?",
+                id="query-input",
+            )
             
             # Query display (hidden initially)
             yield QueryDisplay(id="query-display")
             
-            # Status panel
+            # Status panel (hidden initially)
             yield StatusPanel(id="status-panel")
             
-            # Results area with two columns
+            # Results area with two columns (hidden initially, shown when data arrives)
             with ScrollableContainer(id="results-container"):
                 with Horizontal():
                     # Left panel: Holdings and Performance
@@ -304,14 +314,18 @@ class PortfolioApp(App):
         Requirements: 1.3 - Focus Query_Input on startup
         Requirements: 9.3 - Handle missing API keys on startup
         """
-        # Focus the query input on startup
-        query_input = self.query_one("#query-input", Input)
-        query_input.focus()
-        
         # Check for API key errors and display warning
         if self._api_key_error:
             status_panel = self.query_one("#status-panel", StatusPanel)
             status_panel.set_error(self._api_key_error)
+        
+        # Focus the query input on startup - use call_after_refresh to ensure widget is ready
+        self.call_after_refresh(self._focus_input)
+    
+    def _focus_input(self) -> None:
+        """Focus the query input field."""
+        query_input = self.query_one("#query-input", Input)
+        self.set_focus(query_input)
     
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle query submission.
@@ -360,6 +374,7 @@ class PortfolioApp(App):
         welcome_message = self.query_one("#welcome-message", WelcomeMessage)
         query_display = self.query_one("#query-display", QueryDisplay)
         status_panel = self.query_one("#status-panel", StatusPanel)
+        results_container = self.query_one("#results-container", ScrollableContainer)
         holdings_table = self.query_one("#holdings-table", HoldingsTable)
         performance_display = self.query_one("#performance-display", PerformanceDisplay)
         insights_panel = self.query_one("#insights-panel", InsightsPanel)
@@ -394,6 +409,9 @@ class PortfolioApp(App):
                 # Update status
                 status_panel.set_complete("Analyzing query with AI agent...")
                 status_panel.set_analysis_complete()
+                
+                # Show results container now that we have data
+                results_container.add_class("visible")
                 
                 # Update all widgets with the summary
                 holdings_table.update_holdings(result.summary)

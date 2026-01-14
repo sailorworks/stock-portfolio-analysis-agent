@@ -34,6 +34,11 @@ class StatusPanel(Static):
         padding: 1;
         border: solid #58A6FF;
         margin-bottom: 1;
+        display: none;
+    }
+    
+    StatusPanel.visible {
+        display: block;
     }
     """
     
@@ -66,6 +71,7 @@ class StatusPanel(Static):
             
         Requirements: 3.2
         """
+        self.add_class("visible")
         self._status_lines.append(("⏳", tool_name, "yellow"))
         self.update(self._render_status())
     
@@ -106,6 +112,7 @@ class StatusPanel(Static):
         
         Requirements: 3.1
         """
+        self.add_class("visible")
         self._status_lines = [("⏳", "Starting analysis...", "yellow")]
         self.update(self._render_status())
     

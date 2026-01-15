@@ -2,6 +2,11 @@
 
 An intelligent stock portfolio analysis agent built with **Composio Tool Router**, **OpenAI GPT-4o-mini**, and **yFinance**. The agent analyzes hypothetical investment opportunities, tracks stock performance, simulates portfolio allocations, and generates AI-powered bull/bear insights.
 
+## 🎥 Live Demo (CLI in Action)
+
+![CLI Demo](https://raw.githubusercontent.com/sailorworks/stock-portfolio-analysis-agent/main/assets/demo.gif)
+
+
 ## ✨ Features
 
 - 🗣️ **Natural Language Queries** - Ask investment questions in plain English

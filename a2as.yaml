@@ -1,0 +1,881 @@
+manifest:
+  version: "0.1.2"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: sailorworks/stock-portfolio-analysis-agent
+    source: https://github.com/sailorworks/stock-portfolio-analysis-agent
+    branch: main
+    commit: "5e0958a1"
+    scope: [agent/agent_config.py, agent/api.py, agent/insights.py, agent/models.py, agent/portfolio.py, agent/prompts.py,
+      agent/session.py, agent/tools.py, main.py]
+  issued:
+    by: A2AS.org
+    at: '2026-01-26T16:16:34Z'
+  signatures:
+    digest: sha256:CyQd-D9IT-EyhnNqJ6jZNuWtCCMwfQCAMfN_dZaBjgY
+    key: ed25519:KduKkPs16vOELDPM-v0aHW9cdUodpdVNqthRqqPCqN4
+    sig: ed25519:I_nNgbVqScvPMxJHgzornnjJ_1RG_oIICFKZuf0k6Fi6MA-v-9VWuJ3kMElfMV_7G1FiQ5_YTtG_GbKeIOVbCw
+
+agents:
+  agent.0:
+    type: instance
+    models: [model]
+    tools: [tools]
+    params:
+      function: create_portfolio_agent
+      name: Stock Portfolio Analyst
+      instance: agent
+      instructions: [system_prompt]
+  agent.1:
+    type: instance
+    models: [model]
+    params:
+      function: create_insights_agent
+      name: Investment Insights Generator
+      instance: agent
+      instructions: [system_prompt]
+  insights_agent:
+    type: instance
+    models: [model]
+    params:
+      function: generate_insights
+      name: Investment Insights Generator
+      instructions: [system_prompt]
+
+models:
+  model:
+    type: variable
+    agents: [insights_agent, agent.0, agent.1]
+
+tools:
+  tools:
+    type: variable
+    agents: [agent.0]
+    params:
+      dynamic: "True"
+      description: |-
+        Get all registered custom tools from the default session.
+
+        Requirements: 2.2 - Session provides access to tools via session.tools()
+
+        This is a convenience method that returns custom tools for the default user.
+
+        Returns:
+            List of FunctionTool objects for all 5 custom tools
+
+imports:
+  _calculate_metrics_impl: agent.tools._calculate_metrics_impl
+  _fetch_benchmark_data_impl: agent.tools._fetch_benchmark_data_impl
+  _fetch_stock_data_impl: agent.tools._fetch_stock_data_impl
+  _simulate_portfolio_impl: agent.tools._simulate_portfolio_impl
+  _simulate_spy_investment_impl: agent.tools._simulate_spy_investment_impl
+  Agent: agents.Agent
+  AgentClient: agent.cli.client.AgentClient
+  AgentOrchestrator: agent.agent_config.AgentOrchestrator
+  AnalysisResult: agent.cli.client.AnalysisResult
+  AnalyzeRequest: agent.api.AnalyzeRequest
+  AnalyzeResponse: agent.api.AnalyzeResponse
+  Any: typing.Any
+  APIErrorResponse: agent.api.APIErrorResponse
+  app: agent.api.app
+  App: textual.app.App
+  asynccontextmanager: contextlib.asynccontextmanager
+  AsyncGenerator: typing.AsyncGenerator
+  asyncio: asyncio
+  BaseModel: pydantic.BaseModel
+  BenchmarkDataOutput: agent.models.BenchmarkDataOutput
+  Binding: textual.binding.Binding
+  build_summary_from_tool_results: agent.api.build_summary_from_tool_results
+  calculate_metrics: agent.tools.calculate_metrics
+  CalculateMetricsInput: agent.models.CalculateMetricsInput
+  ComposeResult: textual.app.ComposeResult
+  Composio: composio.Composio
+  Container: textual.containers.Container
+  CORSMiddleware: fastapi.middleware.cors.CORSMiddleware
+  create_app: agent.api.create_app
+  create_insights_agent: agent.agent_config.create_insights_agent
+  create_portfolio_agent: agent.agent_config.create_portfolio_agent
+  CUSTOM_TOOL_SLUGS: agent.session.CUSTOM_TOOL_SLUGS
+  dataclass: dataclasses.dataclass
+  datetime: datetime.datetime
+  DEFAULT_MODEL: agent.agent_config.DEFAULT_MODEL
+  DEFAULT_USER_ID: agent.session.DEFAULT_USER_ID
+  Dict: typing.Dict
+  Enum: enum.Enum
+  ErrorCode: agent.errors.ErrorCode
+  FastAPI: fastapi.FastAPI
+  fetch_benchmark_data: agent.tools.fetch_benchmark_data
+  fetch_stock_data: agent.tools.fetch_stock_data
+  FetchBenchmarkInput: agent.models.FetchBenchmarkInput
+  FetchStockDataInput: agent.models.FetchStockDataInput
+  Field: pydantic.Field
+  Footer: textual.widgets.Footer
+  format_portfolio_context: agent.prompts.format_portfolio_context
+  format_portfolio_data_for_insights: agent.prompts.format_portfolio_data_for_insights
+  generate_insights_from_summary: agent.insights.generate_insights_from_summary
+  get_composio: agent.tools.get_composio
+  get_default_tools: agent.session.get_default_tools
+  get_insights_prompt: agent.prompts.get_insights_prompt
+  get_insights_prompt_with_context: agent.prompts.get_insights_prompt_with_context
+  get_orchestrator: agent.agent_config.get_orchestrator
+  get_orchestrator_instance: agent.api.get_orchestrator_instance
+  get_portfolio_manager: agent.portfolio.get_portfolio_manager
+  get_query_parser_prompt: agent.prompts.get_query_parser_prompt
+  get_session_manager: agent.session.get_session_manager
+  get_session_manager_instance: agent.api.get_session_manager_instance
+  Header: textual.widgets.Header
+  HoldingsTable: agent.cli.widgets.HoldingsTable
+  Horizontal: textual.containers.Horizontal
+  HTTPException: fastapi.HTTPException
+  initialize_components: main.initialize_components
+  Input: textual.widgets.Input
+  Insight: agent.models.Insight
+  Insights: agent.models.Insights
+  INSIGHTS_GENERATOR_PROMPT: agent.prompts.INSIGHTS_GENERATOR_PROMPT
+  INSIGHTS_GENERATOR_WITH_CONTEXT_PROMPT: agent.prompts.INSIGHTS_GENERATOR_WITH_CONTEXT_PROMPT
+  InsightsPanel: agent.cli.widgets.InsightsPanel
+  InvalidDateError: agent.errors.InvalidDateError
+  InvalidTickerError: agent.errors.InvalidTickerError
+  InvestmentSummary: agent.models.InvestmentSummary
+  json: json
+  JSONResponse: fastapi.responses.JSONResponse
+  Label: textual.widgets.Label
+  List: typing.List
+  Literal: typing.Literal
+  load_dotenv: dotenv.load_dotenv
+  log_tool_error: agent.errors.log_tool_error
+  logging: logging
+  MetricsOutput: agent.models.MetricsOutput
+  NoDataAvailableError: agent.errors.NoDataAvailableError
+  OpenAIAgentsProvider: composio_openai_agents.OpenAIAgentsProvider
+  Optional: typing.Optional
+  os: os
+  pd: pandas
+  PerformanceDisplay: agent.cli.widgets.PerformanceDisplay
+  PerformancePoint: agent.models.PerformancePoint
+  Portfolio: agent.portfolio.Portfolio
+  PortfolioApp: agent.cli.app.PortfolioApp
+  PortfolioHolding: agent.portfolio.PortfolioHolding
+  PortfolioHoldingRequest: agent.api.PortfolioHoldingRequest
+  PortfolioManager: agent.portfolio.PortfolioManager
+  PortfolioRequest: agent.api.PortfolioRequest
+  PydanticValidationError: pydantic.ValidationError
+  QUERY_PARSER_SYSTEM_PROMPT: agent.prompts.QUERY_PARSER_SYSTEM_PROMPT
+  re: re
+  Request: fastapi.Request
+  run_agent_analysis: agent.api.run_agent_analysis
+  Runner: agents.Runner
+  ScrollableContainer: textual.containers.ScrollableContainer
+  SessionAnalyzeRequest: agent.api.SessionAnalyzeRequest
+  SessionInfoResponse: agent.api.SessionInfoResponse
+  SessionManager: agent.session.SessionManager
+  simulate_portfolio: agent.tools.simulate_portfolio
+  simulate_spy_investment: agent.tools.simulate_spy_investment
+  SimulatePortfolioInput: agent.models.SimulatePortfolioInput
+  SimulateSPYInput: agent.models.SimulateSPYInput
+  SimulationOutput: agent.models.SimulationOutput
+  SPYSimulationOutput: agent.models.SPYSimulationOutput
+  SSEEvent: agent.api.SSEEvent
+  Static: textual.widgets.Static
+  StatusPanel: agent.cli.widgets.StatusPanel
+  StockDataMetadata: agent.models.StockDataMetadata
+  StockDataOutput: agent.models.StockDataOutput
+  StreamingResponse: fastapi.responses.StreamingResponse
+  sys: sys
+  timedelta: datetime.timedelta
+  ToolError: agent.errors.ToolError
+  ToolExecutionError: agent.errors.ToolExecutionError
+  traceback: traceback
+  Transaction: agent.models.Transaction
+  TransactionLog: agent.cli.widgets.TransactionLog
+  Union: typing.Union
+  uuid: uuid
+  uvicorn: uvicorn
+  ValidationError: agent.errors.ValidationError
+  Vertical: textual.containers.Vertical
+  wrap_tool_error: agent.errors.wrap_tool_error
+  yf: yfinance
+  YFinanceAPIError: agent.errors.YFinanceAPIError
+
+functions:
+  __init__:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+  _calculate_allocations:
+    type: sync
+    module: agent.tools
+    args: [invested_amounts]
+    params:
+      returns: Dict
+  _calculate_metrics_impl:
+    type: sync
+    module: agent.tools
+    args: [request]
+    params:
+      returns: MetricsOutput
+  _calculate_portfolio_value:
+    type: sync
+    module: agent.tools
+    args: [holdings, current_prices, remaining_cash]
+    params:
+      returns: float
+  _calculate_returns:
+    type: sync
+    module: agent.tools
+    args: [holdings, current_prices, invested_amounts]
+    params:
+      returns: tuple
+  _cleanup_tasks:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  _fetch_benchmark_data_impl:
+    type: sync
+    module: agent.tools
+    args: [request]
+    params:
+      returns: BenchmarkDataOutput
+  _fetch_stock_data_impl:
+    type: sync
+    module: agent.tools
+    args: [request]
+    params:
+      returns: StockDataOutput
+  _focus_input:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  _generate_performance_data:
+    type: sync
+    module: agent.tools
+    args: [holdings, historical_prices, spy_prices, remaining_cash, invested_amounts]
+    params:
+      returns: list[PerformancePoint]
+  _get_composio:
+    type: sync
+    module: agent.session
+    args: [self]
+    params:
+      returns: Composio
+  _initialize:
+    type: sync
+    module: agent.session
+    args: [self]
+    params:
+      returns: None
+  _register_all_tools:
+    type: sync
+    module: agent.tools
+    args: [composio]
+    params:
+      returns: None
+  _register_custom_tools:
+    type: sync
+    module: agent.session
+    args: [self]
+    params:
+      returns: None
+  _simulate_dca:
+    type: sync
+    module: agent.tools
+    args: [ticker, amount, prices, available_cash, dca_interval]
+    params:
+      returns: tuple
+  _simulate_portfolio_impl:
+    type: sync
+    module: agent.tools
+    args: [request]
+    params:
+      returns: SimulationOutput
+  _simulate_single_shot:
+    type: sync
+    module: agent.tools
+    args: [ticker, amount, prices, available_cash]
+    params:
+      returns: tuple
+  _simulate_spy_dca:
+    type: sync
+    module: agent.tools
+    args: [total_amount, spy_prices, dca_interval]
+    params:
+      returns: tuple
+  _simulate_spy_investment_impl:
+    type: sync
+    module: agent.tools
+    args: [request]
+    params:
+      returns: SPYSimulationOutput
+  _simulate_spy_single_shot:
+    type: sync
+    module: agent.tools
+    args: [total_amount, spy_prices]
+    params:
+      returns: tuple
+  action_cancel:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  action_quit:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  add_investment:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id, ticker_symbol, investment_amount, purchase_date]
+    params:
+      returns: Portfolio
+  add_request_id:
+    type: async
+    module: agent.api
+    args: [request, call_next]
+  analyze:
+    type: async
+    module: agent.cli.client
+    args: [self, query, user_id]
+    params:
+      returns: AnalysisResult
+  analyze_portfolio:
+    type: async
+    module: agent.api
+    args: [request]
+  analyze_portfolio_sync:
+    type: async
+    module: agent.api
+    args: [request]
+    params:
+      returns: AnalyzeResponse
+  build_summary_from_tool_results:
+    type: sync
+    module: agent.api
+    args: [tool_results]
+    params:
+      returns: Optional[InvestmentSummary]
+  calculate_metrics:
+    type: sync
+    module: agent.session
+    args: [request]
+    params:
+      returns: dict
+  check_api_keys:
+    type: sync
+    module: agent.cli.app
+    params:
+      returns: Optional[str]
+  cleanup_components:
+    type: sync
+    module: main
+    params:
+      returns: None
+  clear:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  clear_portfolio:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id]
+    params:
+      returns: Portfolio
+  close_session:
+    type: sync
+    module: agent.session
+    args: [self, user_id]
+    params:
+      returns: None
+  compose:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: ComposeResult
+  configure_logging:
+    type: sync
+    module: main
+    params:
+      returns: logging.Logger
+  create_app:
+    type: sync
+    module: agent.api
+    params:
+      returns: FastAPI
+  create_configured_app:
+    type: sync
+    module: main
+  create_insights_agent:
+    type: sync
+    module: agent.agent_config
+    args: [user_id, session_manager, model]
+    params:
+      returns: Agent
+  create_portfolio_agent:
+    type: sync
+    module: agent.agent_config
+    args: [user_id, session_manager, model, portfolio]
+    params:
+      returns: Agent
+  create_session:
+    type: sync
+    module: agent.session
+    args: [self, user_id]
+    params:
+      returns: Any
+  event_generator:
+    type: async
+    module: agent.api
+    params:
+      returns: AsyncGenerator
+  fetch_benchmark_data:
+    type: sync
+    module: agent.session
+    args: [request]
+    params:
+      returns: dict
+  fetch_stock_data:
+    type: sync
+    module: agent.session
+    args: [request]
+    params:
+      returns: dict
+  format_error_message:
+    type: sync
+    module: agent.cli.app
+    args: [error]
+    params:
+      returns: str
+  format_portfolio_context:
+    type: sync
+    module: agent.prompts
+    args: [holdings, total_invested]
+    params:
+      returns: str
+  format_portfolio_data_for_insights:
+    type: sync
+    module: agent.prompts
+    args: [tickers, holdings, current_prices, invested_amounts, returns, percent_returns, allocations, total_value, spy_return]
+    params:
+      returns: str
+  format_sse_event:
+    type: sync
+    module: agent.api
+    args: [event_type, data]
+    params:
+      returns: str
+  format_tool_error_message:
+    type: sync
+    module: agent.api
+    args: [error]
+    params:
+      returns: str
+  general_exception_handler:
+    type: async
+    module: agent.api
+    args: [request, exc]
+    params:
+      returns: JSONResponse
+  generate_insights:
+    type: async
+    module: agent.insights
+    args: [tickers, holdings, current_prices, invested_amounts, returns, percent_returns, allocations, total_value, spy_return,
+      model]
+    params:
+      returns: Optional[Insights]
+  generate_insights_from_summary:
+    type: async
+    module: agent.insights
+    args: [summary, spy_return, model]
+    params:
+      returns: Optional[Insights]
+  get_all_tickers:
+    type: sync
+    module: agent.portfolio
+    args: [self]
+    params:
+      returns: List[str]
+  get_composio:
+    type: sync
+    module: agent.tools
+    params:
+      returns: Composio
+  get_config:
+    type: async
+    module: agent.api
+    params:
+      returns: Dict
+  get_default_session:
+    type: sync
+    module: agent.session
+    args: [self]
+    params:
+      returns: Any
+  get_default_tools:
+    type: sync
+    module: agent.session
+    args: [api_key]
+    params:
+      returns: List[Any]
+  get_holdings_by_ticker:
+    type: sync
+    module: agent.portfolio
+    args: [self, ticker_symbol]
+    params:
+      returns: List[PortfolioHolding]
+  get_insights_agent:
+    type: sync
+    module: agent.agent_config
+    args: [self, user_id]
+    params:
+      returns: Agent
+  get_insights_prompt:
+    type: sync
+    module: agent.prompts
+    params:
+      returns: str
+  get_insights_prompt_with_context:
+    type: sync
+    module: agent.prompts
+    args: [tickers, holdings, current_prices, invested_amounts, returns, percent_returns, allocations, total_value, spy_return]
+    params:
+      returns: str
+  get_invested_by_ticker:
+    type: sync
+    module: agent.portfolio
+    args: [self]
+    params:
+      returns: Dict
+  get_or_create_session:
+    type: sync
+    module: agent.session
+    args: [self, user_id]
+    params:
+      returns: Any
+  get_orchestrator:
+    type: sync
+    module: agent.agent_config
+    args: [api_key, model]
+    params:
+      returns: AgentOrchestrator
+  get_orchestrator_instance:
+    type: sync
+    module: agent.api
+  get_portfolio:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id]
+    params:
+      returns: Portfolio
+  get_portfolio_agent:
+    type: sync
+    module: agent.agent_config
+    args: [self, user_id, portfolio]
+    params:
+      returns: Agent
+  get_portfolio_manager:
+    type: sync
+    module: agent.portfolio
+    params:
+      returns: PortfolioManager
+  get_query_parser_prompt:
+    type: sync
+    module: agent.prompts
+    args: [holdings, total_invested]
+    params:
+      returns: str
+  get_session:
+    type: sync
+    module: agent.session
+    args: [self, user_id]
+    params:
+      returns: Optional[Any]
+  get_session_info:
+    type: async
+    module: agent.api
+    args: [user_id]
+    params:
+      returns: SessionInfoResponse
+  get_session_manager:
+    type: sync
+    module: agent.agent_config
+    args: [self]
+    params:
+      returns: SessionManager
+  get_session_manager_instance:
+    type: sync
+    module: agent.api
+  get_tools:
+    type: sync
+    module: agent.session
+    args: [self, user_id]
+    params:
+      returns: List[Any]
+  get_total_invested:
+    type: sync
+    module: agent.portfolio
+    args: [self]
+    params:
+      returns: float
+  has_portfolio:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id]
+    params:
+      returns: bool
+  health_check:
+    type: async
+    module: agent.api
+  hide:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  http_exception_handler:
+    type: async
+    module: agent.api
+    args: [request, exc]
+    params:
+      returns: JSONResponse
+  initialize_components:
+    type: sync
+    module: main
+    params:
+      returns: None
+  is_empty:
+    type: sync
+    module: agent.portfolio
+    args: [self]
+    params:
+      returns: bool
+  is_tool_error:
+    type: sync
+    module: agent.api
+    args: [result]
+    params:
+      returns: bool
+  lifespan:
+    type: async
+    module: main
+    args: [app]
+    params:
+      returns: AsyncGenerator
+  list_registered_tools:
+    type: async
+    module: agent.api
+    params:
+      returns: Dict
+  log_tool_error:
+    type: sync
+    module: agent.errors
+    args: [tool_name, error, context]
+    params:
+      returns: None
+  main:
+    type: sync
+    module: main
+  model_post_init:
+    type: sync
+    module: agent.portfolio
+    args: [self, __context]
+    params:
+      returns: None
+  on_input_submitted:
+    type: async
+    module: agent.cli.app
+    args: [self, event]
+    params:
+      returns: None
+  on_mount:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  on_unmount:
+    type: async
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  parse_agent_output_to_summary:
+    type: sync
+    module: agent.api
+    args: [agent_output, fallback_params]
+    params:
+      returns: Optional[InvestmentSummary]
+  parse_insights_from_response:
+    type: sync
+    module: agent.insights
+    args: [response_text]
+    params:
+      returns: Optional[Insights]
+  parse_query_simple:
+    type: sync
+    module: agent.api
+    args: [query]
+    params:
+      returns: Dict
+  pydantic_validation_error_handler:
+    type: async
+    module: agent.api
+    args: [request, exc]
+    params:
+      returns: JSONResponse
+  remove_investment:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id, ticker_symbol]
+    params:
+      returns: Portfolio
+  root:
+    type: async
+    module: agent.api
+  run_agent_analysis:
+    type: async
+    module: agent.api
+    args: [query, user_id, portfolio_holdings]
+    params:
+      returns: Dict
+  run_analysis:
+    type: async
+    module: agent.cli.app
+    args: [self, query]
+    params:
+      returns: None
+  run_cli:
+    type: sync
+    module: agent.cli.app
+    params:
+      returns: None
+  set_portfolio:
+    type: sync
+    module: agent.portfolio
+    args: [self, user_id, portfolio]
+    params:
+      returns: None
+  show:
+    type: sync
+    module: agent.cli.app
+    args: [self]
+    params:
+      returns: None
+  show_query:
+    type: sync
+    module: agent.cli.app
+    args: [self, query]
+    params:
+      returns: None
+  shutdown_event:
+    type: async
+    module: main
+  simulate_portfolio:
+    type: sync
+    module: agent.session
+    args: [request]
+    params:
+      returns: dict
+  simulate_spy_investment:
+    type: sync
+    module: agent.session
+    args: [request]
+    params:
+      returns: dict
+  startup_event:
+    type: async
+    module: main
+  to_error_response:
+    type: sync
+    module: agent.errors
+    args: [self]
+    params:
+      returns: ToolError
+  tool_execution_error_handler:
+    type: async
+    module: agent.api
+    args: [request, exc]
+    params:
+      returns: JSONResponse
+  tools:
+    type: sync
+    module: agent.session
+    args: [self]
+    params:
+      returns: List[Any]
+  validate_environment:
+    type: sync
+    module: main
+    params:
+      returns: bool
+  wrap_tool_error:
+    type: sync
+    module: agent.errors
+    args: [error, tool_name]
+    params:
+      returns: ToolExecutionError
+
+variables:
+  COMPOSIO_API_KEY:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [agent.api, agent.session]
+  HOST:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]
+  key:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [agent.cli.app]
+  LOG_FORMAT:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]
+  LOG_LEVEL:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main, agent.cli.app]
+  MODEL:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [agent.api]
+  OPENAI_API_KEY:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [agent.api]
+  PORT:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]
+  RELOAD:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]
+  var:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]
+  WORKERS:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [main]

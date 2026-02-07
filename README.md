@@ -183,6 +183,40 @@ uv run python main.py  # Starts the API server
 
 The API will be available at `http://localhost:8000`
 
+### Run with Docker (production)
+
+```bash
+# Build
+docker build -t spa-agent .
+
+# Run (set your API keys)
+docker run \
+  -e COMPOSIO_API_KEY=your_composio_api_key \
+  -e OPENAI_API_KEY=your_openai_api_key \
+  -e PORT=8000 -e HOST=0.0.0.0 \
+  -p 8000:8000 \
+  spa-agent
+```
+
+**Test the API:**
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Analyze a portfolio (sync)
+curl -X POST http://localhost:8000/analyze/sync \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What if I invested $10,000 in AAPL since 2020?"}'
+```
+
+**Available Endpoints:**
+- `GET /health` — Check if API is running
+- `POST /analyze/sync` — Analyze query (wait for full response)
+- `POST /analyze` — Analyze with SSE streaming (real-time)
+
+Set `CORS_ORIGINS` env var (comma-separated) to restrict cross-origin access in production.
+
 ---
 
 ## 👤 User Flow

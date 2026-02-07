@@ -1,0 +1,41 @@
+# Version Control
+.git
+.gitignore
+
+# Python Virtual Environments
+.venv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Testing
+tests/
+.tests/
+.pytest_cache/
+.hypothesis/
+*.coverage
+.coverage.*
+htmlcov/
+
+# OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local Configuration
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*

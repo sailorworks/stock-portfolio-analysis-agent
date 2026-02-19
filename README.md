@@ -4,7 +4,7 @@ An intelligent stock portfolio analysis agent built with **Composio Tool Router*
 
 ## 🎥 Live Demo (CLI in Action)
 
-![CLI Demo](https://raw.githubusercontent.com/sailorworks/stock-portfolio-analysis-agent/main/assets/demo.gif)
+![CLI Demo](https://raw.githubusercontent.com/sailorworks/stock-portfolio-analysis-agent/main/assets/stockdemo.gif)
 
 
 ## ✨ Features
